@@ -67,22 +67,22 @@ window.COURSE = {
       weeks: [
         { n: 7, title: "Search by meaning", ling: "Distributional semantics: meaning from context",
           lessons: [
-            { id: "l13", title: "From word counts to dense vectors" },
-            { id: "l14", title: "Chunking and indexing a corpus" }
+            { id: "l13", title: "From word counts to dense vectors", href: "lessons/w07-l13-vectors.html", mins: 70 },
+            { id: "l14", title: "Chunking and indexing a corpus", href: "lessons/w07-l14-chunking.html", mins: 70 }
           ],
           reading: "SLP3, the chapter on vector semantics and embeddings" },
         { n: 8, title: "Hybrid retrieval", ling: "Lexical versus semantic similarity",
           lessons: [
-            { id: "l15", title: "Keyword search (BM25) plus vectors" },
-            { id: "l16", title: "Reranking and retrieval metrics" }
+            { id: "l15", title: "Keyword search (BM25) plus vectors", href: "lessons/w08-l15-hybrid.html", mins: 75 },
+            { id: "l16", title: "Reranking and retrieval metrics", href: "lessons/w08-l16-rerank.html", mins: 75 }
           ],
           reading: "SLP3, the chapter on information retrieval" },
         { n: 9, title: "Grounded answers", ling: "Cross-lingual meaning",
           lessons: [
-            { id: "l17", title: "Generating answers with citations" },
-            { id: "l18", title: "Cross-lingual retrieval" }
+            { id: "l17", title: "Generating answers with citations", href: "lessons/w09-l17-rag.html", mins: 75 },
+            { id: "l18", title: "Cross-lingual retrieval", href: "lessons/w09-l18-crosslingual.html", mins: 75 }
           ],
-          reading: "One paper on multilingual sentence embeddings", milestone: "Ship the semantic search" }
+          reading: "Lewis et al. (2020) on RAG; Reimers & Gurevych (2020) on multilingual sentence embeddings", milestone: "Ship the semantic search" }
       ]
     },
     {

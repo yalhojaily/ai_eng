@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 15: Keyword search (BM25) plus vectors</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 4 · Week 8 · Lesson 15 · about 75 minutes</div>
+    <h1>Keyword search (BM25) plus vectors</h1>
+    <p class="lede">Word matching and embeddings fail in different places. This lesson sharpens the first, teaches it some morphology, and then combines the two so that each covers for the other.</p>
+    <ul class="toc">
+      <li><a href="#bm25">1 BM25</a></li>
+      <li><a href="#lex">2 Two similarities</a></li>
+      <li><a href="#norm">3 Normalising Arabic</a></li>
+      <li><a href="#hybrid">4 Hybrid</a></li>
+      <li><a href="#rrf">5 Rank fusion</a></li>
+      <li><a href="#notes">6 In practice</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain the two corrections BM25 makes to tf-idf, and what its two parameters do.</li>
+      <li>Distinguish lexical from semantic similarity, with examples where they disagree.</li>
+      <li>Normalise Arabic text for search, and name the risks of doing so.</li>
+      <li>Fuse two ranked lists with reciprocal rank fusion.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> For <code>SCONJ</code>, trust word matching: it is an exact string, and an embedding model may have no useful vector for it. For <span class="ar">الكتاب</span> neither is safe. Word matching sees <span class="ar">الكتاب</span>, <span class="ar">كتاب</span> and <span class="ar">وكتابها</span> as three unrelated strings, and embeddings may or may not link them. Both problems are fixable, and fixing them is today's work.</div>
+
+  <h2 id="bm25">1. BM25: tf-idf with two corrections</h2>
+  <p>BM25 has been the standard word-matching ranking function for about thirty years and is still the baseline every new retriever is compared with. It keeps idf and repairs two faults in raw term frequency.</p>
+  <p><b>Saturation.</b> In tf-idf a word occurring twenty times counts twenty times as much as one occurrence. But a page that mentions <i>dual</i> twenty times is not twenty times more about the dual than a page that mentions it once; after the first few mentions, more add little. BM25 makes the contribution level off. The parameter <b>k1</b> sets how quickly.</p>
+  <p><b>Length normalisation.</b> Long documents contain more of every word simply by being long. BM25 discounts term frequency in documents longer than average and boosts it in shorter ones. The parameter <b>b</b> sets how strongly, from 0 (ignore length) to 1 (full correction).</p>
+<pre><code>score(term, doc) = idf(term) × tf × (k1 + 1)
+                              ─────────────────────────────────────────
+                              tf + k1 × (1 − b + b × doclen / avglen)</code></pre>
+
+  <div class="try" id="bm">
+    <span class="label">Try it · 1</span>
+    <h3>See the saturation</h3>
+    <svg id="bm-svg" viewBox="0 0 320 200" role="img" aria-label="BM25 score against term frequency for short, average and long documents" style="width:100%;max-width:460px;display:block;margin:auto"></svg>
+    <div class="row"><label for="bm-k" class="small" style="min-width:110px">k1 <b id="bm-kv">1.2</b></label><input id="bm-k" type="range" min="0" max="3" step="0.1" value="1.2"></div>
+    <div class="row"><label for="bm-b" class="small" style="min-width:110px">b <b id="bm-bv">0.75</b></label><input id="bm-b" type="range" min="0" max="1" step="0.05" value="0.75"></div>
+    <div class="out small" id="bm-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Set b to 0: the three curves merge, because length no longer matters. Set k1 to 0: the score ignores how often the word appears, only whether it does. Raise k1 to 3 and the curves approach the dashed straight line of plain tf-idf. The usual defaults, k1 near 1.2 and b near 0.75, are a good start.</p>
+  </div>
+
+  <h2 id="lex">2. Lexical and semantic similarity</h2>
+  <p>Two texts are <b>lexically</b> similar when they share word forms, and <b>semantically</b> similar when they share meaning. The two usually go together, which is why word matching works at all. The interesting cases are where they part:</p>
+  <table>
+    <tr><th>Pair</th><th>Lexical</th><th>Semantic</th></tr>
+    <tr><td><i>plural</i> / <i>more than one</i></td><td>none</td><td>high</td></tr>
+    <tr><td><i>river bank</i> / <i>bank loan</i></td><td>high</td><td>low</td></tr>
+    <tr><td><i>the drug is safe</i> / <i>the drug is not safe</i></td><td>very high</td><td>opposite</td></tr>
+    <tr><td><span class="ar">كتاب</span> / <span class="ar">وكتابها</span></td><td>none, as strings</td><td>the same word</td></tr>
+  </table>
+  <p>The last row is different in kind. The two strings are the <i>same lexical item</i> wearing different clitics. That is not a meaning problem. It is a morphology problem, and for word matching to work in Arabic it has to be solved before any scoring happens.</p>
+
+  <h2 id="norm">3. Teaching word matching some morphology</h2>
+  <p>English search engines get by with lowercasing and sometimes <b>stemming</b>, chopping endings so that <i>writes</i> and <i>writing</i> meet at <i>writ</i>. Arabic needs more, because so much is attached to the word and because the script allows several spellings of the same thing. A typical light normalisation pipeline:</p>
+  <ol>
+    <li><b>Remove vowel marks</b> and the stretching character (tatweel). <span class="ar">كِتابٌ</span> becomes <span class="ar">كتاب</span>.</li>
+    <li><b>Unify letter variants.</b> The forms of alef <span class="ar">أ إ آ</span> become <span class="ar">ا</span>; final <span class="ar">ى</span> becomes <span class="ar">ي</span>; <span class="ar">ة</span> becomes <span class="ar">ه</span>. Writers are inconsistent about all three.</li>
+    <li><b>Strip common prefixes</b>: the conjunction <span class="ar">و</span>, the article <span class="ar">ال</span>, and prepositions fused to it.</li>
+    <li><b>Strip common suffixes</b>: possessive pronouns and regular plural and dual endings.</li>
+  </ol>
+
+  <div class="try" id="ar">
+    <span class="label">Try it · 2</span>
+    <h3>Normalise, then match</h3>
+    <label class="field"><span>Query word</span><input id="ar-q" type="text" dir="rtl" class="ar" value="الكتاب"></label>
+    <label class="field"><span>Words in the documents</span><input id="ar-d" type="text" dir="rtl" class="ar" value="كِتابٌ وكتابها كتابان الكُتُب مكتبة مكتب كاتب"></label>
+    <div style="overflow-x:auto"><table class="tight" id="ar-table"></table></div>
+    <div class="out" id="ar-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Read the last rows.</b> <span class="ar">الكُتُب</span>, "the books", does not match: Arabic's commonest plurals change the word's internal pattern (Lesson 1), which no amount of chopping at the edges can undo. And <span class="ar">مكتبة</span> (library) now equals <span class="ar">مكتب</span> (office): the normaliser merged two different words. Then try the query <span class="ar">ولد</span> (boy) with the document word <span class="ar">ولدها</span> (her boy): the first letter of the word itself is mistaken for “and” and stripped.</p>
+  </div>
+  <p>Every normalisation step trades recall for precision: more matches found, some of them wrong. Light stemming is a deliberate, modest position on that trade. Full <b>lemmatisation</b>, mapping each word to its dictionary form with a morphological analyser or the annotator you built in Phase 2, is more accurate and far more expensive. Whichever you choose, apply the <i>identical</i> function to documents at indexing time and to queries at search time.</p>
+
+  <h2 id="hybrid">4. Hybrid search</h2>
+  <p>Run both retrievers and combine their results. The reason is not that two is more than one. It is that their errors are nearly independent: BM25 misses paraphrases and finds exact terms, dense retrieval does the reverse. A passage found by either is a candidate, and a passage ranked highly by both is very likely relevant.</p>
+  <p>The difficulty is combining them. BM25 scores are unbounded positive numbers that depend on the collection. Cosine similarities sit between −1 and 1. Adding them is meaningless, and rescaling them is fragile.</p>
+
+  <h2 id="rrf">5. Reciprocal rank fusion</h2>
+  <p>The robust solution ignores scores and uses only <b>ranks</b>. Each retriever gives each document a rank; the document's fused score is the sum, over retrievers, of</p>
+<pre><code>1 / (k + rank)          with k commonly set to 60</code></pre>
+  <p>First place contributes 1/61, second 1/62, and so on. A document missing from a list contributes nothing from that list. The constant k damps the advantage of the very top positions, so that being ranked 3rd by both retrievers beats being ranked 1st by one and absent from the other.</p>
+
+  <div class="try" id="rrf-lab">
+    <span class="label">Try it · 3</span>
+    <h3>Fuse two rankings</h3>
+    <div class="row" id="rf-presets"></div>
+    <div class="panes">
+      <div class="pane" style="min-height:0"><b class="h">BM25 ranking</b><span id="rf-a" class="tally"></span></div>
+      <div class="pane" style="min-height:0"><b class="h">Dense ranking</b><span id="rf-b" class="tally"></span></div>
+    </div>
+    <div class="row"><label for="rf-k" class="small" style="min-width:110px">k <b id="rf-kv">60</b></label><input id="rf-k" type="range" min="0" max="100" step="5" value="60"></div>
+    <div class="bars" id="rf-bars"></div>
+    <p class="small" style="margin:0"><b>Notice:</b> in the first case, document A wins without being first in either list. Now drop k to 0: a single first place dominates. With k at 60 agreement matters more than any one top spot, which is the behaviour you want from a combination.</p>
+  </div>
+
+  <h2 id="notes">6. In practice</h2>
+  <ul>
+    <li><b>Retrieve deep, fuse, then cut.</b> Take perhaps the top 50 from each retriever, fuse, and keep the top 10 or 20 for the next stage.</li>
+    <li><b>Hybrid is the sensible default.</b> It rarely loses to either component alone and often beats both. Lesson 16 gives you the numbers to confirm that on your data.</li>
+    <li><b>Keep BM25 honest.</b> It is only as good as its tokeniser and normaliser. For Arabic, most of BM25's quality is decided in section 3.</li>
+  </ul>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: BM25, normalisation and fusion</h2>
+  <p><b>Time:</b> 90 minutes. <code>pip install rank-bm25</code>. Load the chunks and embeddings you saved in Lesson 14.</p>
+<pre><code>import re
+from rank_bm25 import BM25Okapi
+
+DIACRITICS = re.compile(r"[ً-ْٰـ]")
+PREFIX = re.compile(r"^(وال|بال|كال|فال|لل|ال|و)")
+SUFFIX = re.compile(r"(ها|هم|هن|كم|نا|ات|ون|ين|ان|ه|ي)$")
+
+def normalize_ar(w):
+    w = DIACRITICS.sub("", w)
+    w = re.sub("[أإآ]", "ا", w).replace("ى", "ي").replace("ة", "ه")
+    for rule in (PREFIX, SUFFIX):
+        stripped = rule.sub("", w)
+        if len(stripped) >= 3:
+            w = stripped
+    return w
+
+def tokenize(text):
+    out = []
+    for w in re.findall(r"\w+", text.lower()):
+        out.append(normalize_ar(w) if re.search(r"[؀-ۿ]", w) else w)
+    return out
+
+bm25 = BM25Okapi([tokenize(t) for t in texts])          # texts from Lesson 14
+
+def bm25_search(query, k=50):
+    scores = bm25.get_scores(tokenize(query))
+    return list(np.argsort(-scores)[:k])
+
+def dense_search(query, k=50):
+    return list(np.argsort(-(E @ model.encode(query, normalize_embeddings=True)))[:k])
+
+def rrf(rankings, k=60, top=10):
+    scores = {}
+    for ranking in rankings:
+        for rank, doc in enumerate(ranking, start=1):
+            scores[doc] = scores.get(doc, 0) + 1 / (k + rank)
+    return sorted(scores, key=scores.get, reverse=True)[:top]
+
+def hybrid_search(query, top=10):
+    return rrf([bm25_search(query), dense_search(query)], top=top)</code></pre>
+  <ol>
+    <li>Run your ten queries from Lesson 13 through all three: BM25, dense, hybrid. For each, note the rank of the correct chunk, or "missing".</li>
+    <li>On how many queries does hybrid match or beat the better of the two components? On how many is it worse than one of them?</li>
+    <li>Your corpus is English, so test the Arabic normaliser separately: write twelve Arabic sentences as a tiny corpus, and five one-word queries. Compare BM25 with and without <code>normalize_ar</code>.</li>
+    <li>Find two words the normaliser wrongly merges, and two forms of one word it fails to merge. Would lemmas from your Phase 2 annotator fix them? At what cost per document?</li>
+    <li>Rerun step 1 with k = 1 and k = 200 in <code>rrf</code>. Does the top-10 change?</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l15-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l15-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the information retrieval chapter: the sections on term weighting and BM25.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l15-r2"><label for="r2"><b>Required.</b> The same book's chapter on words and tokens: the sections on word normalisation, lemmatisation and stemming. Compare what it says about English with what you just did for Arabic.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l15-r3"><label for="r3"><b>Optional.</b> Cormack, Clarke and Büttcher (2009), "Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods". Two pages, and the origin of the method and of k = 60.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 16:</b> you now have three retrievers, and by eye each looks best on some queries. What would you need to build in order to say, with a number, which one is best?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w07-l14-chunking.html">← Lesson 14</a> · <a href="../index.html">Course map</a> · <a href="w08-l16-rerank.html">Lesson 16 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson15.js"></script>
+</body>
+</html>

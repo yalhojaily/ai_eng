@@ -175,3 +175,5 @@ pre.live { background: var(--paper); color: var(--ink); border: 1px dashed var(-
 .ok { color: var(--good); font-weight: 700; } .no { color: var(--bad); font-weight: 700; }
 table.tight td, table.tight th { padding: 5px 6px; font-size: .86rem; vertical-align: top; }
 .stepnote { font-size: .9rem; margin: 8px 0; }
+
+.field > select, .field > input[type=text] { width: 100%; }

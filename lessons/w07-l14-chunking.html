@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 14: Chunking and indexing a corpus</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 4 · Week 7 · Lesson 14 · about 70 minutes</div>
+    <h1>Chunking and indexing a corpus</h1>
+    <p class="lede">Before anything can be retrieved, someone has to decide what a "document" is. Cut the text badly and no retriever, however clever, can return a passage that makes sense. This unglamorous step decides more about quality than the choice of model.</p>
+    <ul class="toc">
+      <li><a href="#why">1 Why cut</a></li>
+      <li><a href="#units">2 Units of text</a></li>
+      <li><a href="#how">3 Strategies</a></li>
+      <li><a href="#size">4 Size</a></li>
+      <li><a href="#context">5 Keeping context</a></li>
+      <li><a href="#index">6 The index</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain why long documents must be split before embedding.</li>
+      <li>Compare fixed-size, sentence-based and structure-based chunking on real text.</li>
+      <li>Reason about the trade-off in chunk size.</li>
+      <li>Build an index that keeps each chunk's source and surrounding context.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> First, one vector for forty paragraphs is an average of forty topics, so it is close to none of them and paragraph thirty is drowned out. Many embedding models also read only the first few hundred tokens and silently ignore the rest. Second, even if the page is found, you would have to put all forty paragraphs into the prompt to deliver one.</div>
+
+  <h2 id="why">1. Why documents are cut up</h2>
+  <p>A <b>chunk</b> is the unit you embed, store and retrieve. Three pressures make it smaller than a whole document:</p>
+  <ul>
+    <li><b>Focus.</b> An embedding represents one passage's meaning as one point. The more topics the passage covers, the less that point resembles any of them.</li>
+    <li><b>Limits.</b> Embedding models have a maximum input length. Text beyond it is usually dropped without warning.</li>
+    <li><b>Budget.</b> Retrieved chunks go into the context window. Small, relevant chunks leave room for more of them and cost less (Lesson 7).</li>
+  </ul>
+
+  <h2 id="units">2. Text already has units</h2>
+  <p>Linguists who study text above the sentence, in <b>discourse analysis</b>, observe that writing is organised in nested units: sentences make paragraphs, paragraphs make sections, and each level usually holds one idea at its own scale. A paragraph is, roughly, the writer's own chunk. Cutting along these boundaries keeps ideas whole. Cutting across them gives you the end of one thought glued to the start of another.</p>
+  <p>Finding even the smallest unit is harder than it looks. <b>Sentence segmentation</b> seems to mean "split at full stops", until you meet abbreviations, decimals and initials. And conventions differ by language: Arabic uses its own comma <span class="ar">،</span> and question mark <span class="ar">؟</span>, and Arabic prose often runs long, linking clauses with <span class="ar">و</span> where English would start a new sentence.</p>
+
+  <div class="try" id="seg">
+    <span class="label">Try it · 1</span>
+    <h3>Split at the full stops?</h3>
+    <label class="field"><span>Text</span><textarea id="sg-text" dir="auto" style="min-height:80px">Dr. Hammad wrote 3.5 pages on the dual, e.g. the form كتابان. Is it rare? No. See Sec. 2 for details.</textarea></label>
+    <div class="panes">
+      <div class="pane"><b class="h">Naive: split after . ! ? ؟</b><div id="sg-a"></div></div>
+      <div class="pane"><b class="h">Aware of abbreviations</b><div id="sg-b"></div></div>
+    </div>
+    <p class="small" style="margin:8px 0 0"><b>Notice:</b> the naive splitter produces fragments like “Dr.” that would be embedded and indexed as if they were sentences. Add your own abbreviation, such as <code>approx.</code>, and see that the second splitter has blind spots too. Production systems use trained sentence segmenters for this reason.</p>
+  </div>
+
+  <h2 id="how">3. Three ways to chunk</h2>
+  <ul>
+    <li><b>Fixed size.</b> Every N characters or tokens, often with some <b>overlap</b> so that a sentence cut at a boundary appears whole in at least one chunk. Simple, works on anything, respects nothing.</li>
+    <li><b>Sentence-based.</b> Group whole sentences until a size limit is reached. Never cuts mid-sentence.</li>
+    <li><b>Structure-based.</b> Split at the document's own boundaries: headings and paragraphs. Best when the source has structure, as Markdown, HTML and well-formatted documents do.</li>
+  </ul>
+
+  <div class="try" id="chunk">
+    <span class="label">Try it · 2</span>
+    <h3>Chunk a page</h3>
+    <label class="field"><span>Strategy</span>
+      <select id="ck-how"><option value="fixed">Fixed size (characters)</option><option value="sent">Sentence-based</option><option value="struct">Structure-based (headings and paragraphs)</option></select></label>
+    <div class="row" id="ck-size-row"><label for="ck-size" class="small" style="min-width:170px">Chunk size <b id="ck-sv">200</b> chars</label><input id="ck-size" type="range" min="80" max="500" step="20" value="200"></div>
+    <div class="row" id="ck-over-row"><label for="ck-over" class="small" style="min-width:170px">Overlap <b id="ck-ov">0</b>%</label><input id="ck-over" type="range" min="0" max="50" step="10" value="0"></div>
+    <div class="out" id="ck-stats" aria-live="polite"></div>
+    <div id="ck-chunks" class="msgs"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> With fixed size 200 and no overlap, how many chunks begin or end mid-sentence? Add 20% overlap: what changes, and what does it cost in total characters stored? Switch to structure-based and read the chunks: could each one be understood on its own?</p>
+  </div>
+
+  <h2 id="size">4. How big?</h2>
+  <p>There is no correct size, only a trade-off, and it depends on your questions:</p>
+  <table>
+    <tr><th></th><th>Small chunks</th><th>Large chunks</th></tr>
+    <tr><td>Embedding</td><td>sharp, one idea each</td><td>blurred across ideas</td></tr>
+    <tr><td>Standing alone</td><td>may lack the context to make sense</td><td>self-contained</td></tr>
+    <tr><td>Precision of a hit</td><td>exactly the relevant lines</td><td>relevant lines plus padding</td></tr>
+    <tr><td>Context budget</td><td>many fit</td><td>few fit</td></tr>
+  </table>
+  <p>Questions with short factual answers favour small chunks. Questions needing explanation favour larger ones. A reasonable starting point for prose is a paragraph or two per chunk. Then stop guessing: chunk size is a parameter, and Lesson 16 gives you the metric to tune it with.</p>
+
+  <h2 id="context">5. Do not strand the chunk</h2>
+  <p>A chunk reading <i>"It is tagged AUX, not VERB."</i> is useless alone. What is? The answer was in the heading two lines above. Three techniques restore what cutting removed:</p>
+  <ul>
+    <li><b>Carry metadata.</b> Store with every chunk its source file, its heading path (<i>POS tags › AUX › Copula</i>) and its position. You need these for citations anyway.</li>
+    <li><b>Prepend context before embedding.</b> Embed <i>"POS tags › AUX › Copula: It is tagged AUX, not VERB."</i> The vector now knows what "it" refers to. A stronger variant has a model write a one-line description of where the chunk sits in its document, and embeds that along with it.</li>
+    <li><b>Retrieve small, return big.</b> Match on small chunks for precision, then hand the model the surrounding paragraph or section.</li>
+  </ul>
+
+  <h2 id="index">6. The index is a build artefact</h2>
+  <div class="flow" aria-label="Load, clean, chunk, embed, store">
+    <div class="box">load</div><span class="arr">→</span>
+    <div class="box">clean<small>strip markup</small></div><span class="arr">→</span>
+    <div class="box">chunk<small>+ metadata</small></div><span class="arr">→</span>
+    <div class="box">embed</div><span class="arr">→</span>
+    <div class="box">store</div>
+  </div>
+  <p>Treat this pipeline like a compiler, and its output like a binary: reproducible from source, never edited by hand. Record what produced it (the corpus version, the chunking settings, the embedding model) because a query must be embedded by the same model as the index, and changing any setting means rebuilding. Give each chunk a stable ID such as <code>file#heading#n</code>; your evaluation data in Lesson 16 will refer to chunks by ID.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: build the index</h2>
+  <p><b>Time:</b> 90 minutes. Same corpus as Lesson 13.</p>
+<pre><code>import glob, json, re
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+def chunk_markdown(path, max_chars=1200):
+    """Split at headings, then at paragraphs; keep the heading path with each chunk."""
+    text = open(path, encoding="utf-8").read()
+    text = re.sub(r"^---.*?---\s*", "", text, flags=re.S)       # drop front matter
+    chunks, headings, n = [], [], 0
+    for block in re.split(r"\n\s*\n", text):
+        block = block.strip()
+        if not block:
+            continue
+        m = re.match(r"(#+)\s+(.*)", block)
+        if m:
+            level = len(m.group(1))
+            headings = headings[:level - 1] + [m.group(2).strip()]
+            continue
+        for start in range(0, len(block), max_chars):           # very long paragraphs
+            n += 1
+            chunks.append({
+                "id": f"{path}#{n}",
+                "path": path,
+                "headings": " › ".join(headings),
+                "text": block[start:start + max_chars],
+            })
+    return chunks
+
+chunks = [c for p in sorted(glob.glob("docs/_u-*/*.md")) for c in chunk_markdown(p)]
+model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+texts = [f'{c["headings"]}: {c["text"]}' for c in chunks]      # context prepended
+E = model.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+
+np.save("index/embeddings.npy", E)
+with open("index/chunks.jsonl", "w", encoding="utf-8") as f:
+    for c in chunks:
+        f.write(json.dumps(c, ensure_ascii=False) + "\n")
+json.dump({"model": "paraphrase-multilingual-MiniLM-L12-v2", "max_chars": 1200,
+           "chunks": len(chunks)}, open("index/meta.json", "w"))</code></pre>
+  <ol>
+    <li>Create the <code>index</code> folder and run it. How many chunks? Plot or print the distribution of chunk lengths. Are there many tiny ones (a line or two)? What would you do with them?</li>
+    <li>Read thirty chunks chosen at random. How many can be understood without their heading? With it?</li>
+    <li>Rerun the ten queries from Lesson 13 against chunks instead of whole pages. For each, is the top chunk the paragraph that answers the question?</li>
+    <li>Build a second index <i>without</i> the heading prepended. Compare the top results for three queries where the answer chunk uses a pronoun or omits the topic word.</li>
+    <li>Look up your embedding model's maximum input length in tokens. Using <code>model.tokenizer</code>, count how many of your chunks exceed it.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l14-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l14-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on words and tokens: the section on sentence segmentation.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l14-r2"><label for="r2"><b>Required.</b> Anthropic's article <a href="https://www.anthropic.com/news/contextual-retrieval">Introducing Contextual Retrieval</a>, on prepending generated context to chunks before embedding and indexing. Note how they measured the improvement.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l14-r3"><label for="r3"><b>Optional.</b> The documentation page of the embedding model you are using. Find its maximum sequence length, its vector size, and the languages it was trained on.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 15:</b> a user types the exact tag name <code>SCONJ</code>, and another types <span class="ar">الكتاب</span> looking for passages that mention <span class="ar">كتاب</span>. For each, would you trust word matching or embeddings more, and what could go wrong?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w07-l13-vectors.html">← Lesson 13</a> · <a href="../index.html">Course map</a> · <a href="w08-l15-hybrid.html">Lesson 15 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson14.js"></script>
+</body>
+</html>

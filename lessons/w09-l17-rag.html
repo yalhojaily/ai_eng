@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 17: Generating answers with citations</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 4 · Week 9 · Lesson 17 · about 75 minutes</div>
+    <h1>Generating answers with citations</h1>
+    <p class="lede">Retrieval finds the passages. Now a model has to answer from them, and only from them, and show where each statement came from. Getting the passages into the prompt is easy. Getting the model to stay inside them, and proving that it did, is the engineering.</p>
+    <ul class="toc">
+      <li><a href="#rag">1 The pipeline</a></li>
+      <li><a href="#entail">2 Entailment</a></li>
+      <li><a href="#prompt">3 The prompt</a></li>
+      <li><a href="#cite">4 Citations</a></li>
+      <li><a href="#abstain">5 Saying no</a></li>
+      <li><a href="#eval">6 Evaluating</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Assemble a retrieval-augmented generation pipeline end to end.</li>
+      <li>Distinguish entailed, contradicted and unsupported claims.</li>
+      <li>Make a model cite its sources in a form that code can verify.</li>
+      <li>Diagnose a wrong answer to the stage that caused it.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> You cannot detect it by looking at the answer alone: a wrong answer from memory reads as fluently as a right one from the sources. You have to require the model to tie each statement to a passage, then check the tie. That requirement, and the check, are this lesson.</div>
+
+  <h2 id="rag">1. Retrieval-augmented generation</h2>
+  <div class="flow" aria-label="Question, retrieve, assemble context, generate, verify">
+    <div class="box">question</div><span class="arr">→</span>
+    <div class="box">retrieve<small>hybrid + rerank</small></div><span class="arr">→</span>
+    <div class="box">assemble<small>tagged passages</small></div><span class="arr">→</span>
+    <div class="box">generate<small>answer + citations</small></div><span class="arr">→</span>
+    <div class="box">verify<small>gate</small></div>
+  </div>
+  <p>RAG gives a model knowledge it was never trained on: your documents, last week's changes, private data. Compared with relying on the model's memory it has three advantages. The knowledge can be updated by editing files, with no training. Answers can point to their sources. And the model has less reason to invent, since the facts are in front of it.</p>
+  <p>"Less reason" is not "no reason". A model can still ignore the passages and answer from memory, blend the two, or stretch a passage to cover something it does not say. An answer that goes beyond its sources is called <b>unfaithful</b> or <b>ungrounded</b>, and when the invented content is false, a <b>hallucination</b>.</p>
+
+  <h2 id="entail">2. What "supported by the source" means</h2>
+  <p>Semantics has a precise notion for this. A text <b>entails</b> a claim if anyone who accepts the text must accept the claim. The text <b>contradicts</b> the claim if accepting the text means rejecting the claim. Otherwise the claim is <b>neutral</b>: perhaps true, but not something this text settles. Deciding which relation holds is a standard task in NLP called <b>natural language inference</b>.</p>
+  <p>A faithful answer consists of claims the retrieved passages entail. The dangerous category for RAG is the third. Neutral claims are often true, sound right, and come from the model's memory. The system has no evidence for them, and you cannot tell the true ones from the false ones.</p>
+  <div class="try">
+    <span class="label">Try it · 1</span>
+    <h3>Entailed, contradicted, or not stated?</h3>
+    <p class="small"><b>Source:</b> “The dual is a value of the Number feature used for exactly two entities. Arabic marks the dual on nouns, adjectives and verbs.”</p>
+    <div id="nli-box"></div>
+  </div>
+
+  <h2 id="prompt">3. The generation prompt</h2>
+  <p>Everything from Phase 2 applies. The parts that are particular to RAG:</p>
+<pre><code>[system]
+Answer the question using only the passages inside &lt;sources&gt;.
+Every sentence of your answer must be supported by a passage;
+give that passage's id and the exact words that support it.
+If the passages do not contain the answer, say so. Do not use
+knowledge from outside the passages, even if you are confident.
+
+[user]
+&lt;sources&gt;
+  &lt;passage id="c1"&gt;POS tags › AUX › Copula: The copula is ...&lt;/passage&gt;
+  &lt;passage id="c2"&gt;...&lt;/passage&gt;
+&lt;/sources&gt;
+&lt;question&gt;How does UD tag the copula?&lt;/question&gt;</code></pre>
+  <ul>
+    <li><b>Passages are data.</b> They sit inside tags and are described as material, exactly as the sentence was in Lesson 5. A retrieved document may contain text that reads like an instruction.</li>
+    <li><b>Each passage has an ID.</b> Short and stable, so that citations are easy to write and to check.</li>
+    <li><b>Passages first, question last</b>, following Lesson 7's ordering advice.</li>
+    <li><b>The escape route is stated.</b> A model given no permitted way to say "not found" will find something to say.</li>
+  </ul>
+
+  <h2 id="cite">4. Citations that code can check</h2>
+  <p>A citation written as a footnote in prose is decoration. Ask instead for structured output (Lesson 4): a list of sentences, each with the ID it rests on and a <b>verbatim quote</b> from that passage. The quote is the key. A model can attach a plausible ID to anything, but it cannot produce an exact quote that is not there, and a program can check exact quotes without any model at all.</p>
+
+  <div class="try" id="gate">
+    <span class="label">Try it · 2</span>
+    <h3>Run the citation gate</h3>
+    <div class="msgs" id="cg-sources"></div>
+    <div class="row" id="cg-presets"></div>
+    <textarea id="cg-json" spellcheck="false" dir="ltr" style="font-family:var(--mono);font-size:.8rem;min-height:210px"></textarea>
+    <div class="out" id="cg-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Load the last case.</b> Every check passes: the ID exists and the quote is exact. Yet the sentence says the opposite of its quote. The gate proves a citation is <i>real</i>; it cannot prove the sentence <i>follows</i> from it. That second question is entailment, and it needs a judge.</p>
+  </div>
+
+  <h2 id="abstain">5. Knowing when not to answer</h2>
+  <p>Some questions have no answer in the corpus. The correct output then is a clear "the sources do not say", and a system that can produce it is far more trustworthy than one that always answers. Three things make abstention work:</p>
+  <ul>
+    <li>The prompt allows it and the schema has a place for it, such as an <code>answerable</code> field that comes <i>before</i> the answer.</li>
+    <li>The retriever's scores are used: if even the best reranker score is low, skip generation and abstain in code.</li>
+    <li>The eval set contains unanswerable questions, so that wrongly answering and wrongly abstaining are both counted.</li>
+  </ul>
+  <p>The two errors trade against each other like precision and recall. A system tuned never to invent will sometimes refuse questions it could have answered. Decide which is worse for your use, and measure both.</p>
+
+  <h2 id="eval">6. Evaluating the whole thing</h2>
+  <p>A RAG system has two components and can fail in either, so it gets measured in layers:</p>
+  <table>
+    <tr><th>Question</th><th>Measured by</th></tr>
+    <tr><td>Was the needed passage retrieved?</td><td>recall@k (Lesson 16)</td></tr>
+    <tr><td>Are citations real?</td><td>the citation gate, in code</td></tr>
+    <tr><td>Does each sentence follow from its quote? (<b>faithfulness</b>)</td><td>a validated model judge (Lesson 11)</td></tr>
+    <tr><td>Is the answer right? (<b>correctness</b>)</td><td>comparison with a reference answer, by judge</td></tr>
+    <tr><td>Did it abstain when it should?</td><td>counts on the unanswerable items</td></tr>
+  </table>
+  <p>Faithfulness and correctness are different. An answer can be faithful to a retrieved passage that happens to be outdated, and so be wrong. It can also be correct from memory while citing nothing, and so be unfaithful. You want both, and when you must choose in a system built on your documents, faithfulness comes first: it is the property that lets a user check you.</p>
+  <div class="try">
+    <span class="label">Try it · 3</span>
+    <h3>Which stage failed?</h3>
+    <div id="dx-box"></div>
+  </div>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: answers you can check</h2>
+  <p><b>Time:</b> 2 hours. Use the retrieval stack from Lesson 16 and <code>call_json</code> from Lesson 8.</p>
+<pre><code>ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answerable": {"type": "boolean"},
+        "sentences": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "text":  {"type": "string"},
+                "cite":  {"type": "string"},
+                "quote": {"type": "string"},
+            },
+            "required": ["text", "cite", "quote"], "additionalProperties": False}},
+    },
+    "required": ["answerable", "sentences"], "additionalProperties": False,
+}
+
+def squash(s):
+    return " ".join(s.split())
+
+def check_citations(answer, passages):
+    """passages: dict id → text. Returns a list of problems (empty if fine)."""
+    problems = []
+    for n, s in enumerate(answer["sentences"], start=1):
+        if s["cite"] not in passages:
+            problems.append(f"sentence {n} cites unknown passage {s['cite']!r}")
+        elif len(s["quote"].split()) &lt; 3:
+            problems.append(f"sentence {n}: the quote is too short to be evidence")
+        elif squash(s["quote"]) not in squash(passages[s["cite"]]):
+            problems.append(f"sentence {n}: the quote does not appear in {s['cite']}")
+    return problems
+
+def answer(question, top=5, max_retries=1):
+    hits = rerank(question, rrf([bm25_search(question), dense_search(question)], top=50), top=top)
+    passages = {f"c{n}": texts[i] for n, i in enumerate(hits, start=1)}
+    sources = "\n".join(f'&lt;passage id="{k}"&gt;{v}&lt;/passage&gt;' for k, v in passages.items())
+    user = f"&lt;sources&gt;\n{sources}\n&lt;/sources&gt;\n&lt;question&gt;{question}&lt;/question&gt;"
+    for attempt in range(max_retries + 1):
+        out = call_json(RAG_SYSTEM, user, ANSWER_SCHEMA, "answer")
+        problems = check_citations(out, passages) if out["answerable"] else []
+        if not problems:
+            return out, passages
+        user += "\nYour previous answer was rejected: " + "; ".join(problems)
+    raise ValueError("no verifiable answer")</code></pre>
+  <ol>
+    <li>Write <code>RAG_SYSTEM</code> from section 3. Ask ten questions your corpus can answer. Read every answer against its quotes.</li>
+    <li>Write five questions the corpus cannot answer, some of them about things the model surely knows from training (for example, the capital of a country). Does it abstain, or answer from memory?</li>
+    <li>Log how often the gate rejects a first attempt, and why.</li>
+    <li>Build a faithfulness judge: given one sentence and its quote, PASS if the quote entails the sentence. Label twenty sentence-quote pairs yourself first, then report kappa (Lesson 11).</li>
+    <li>Remove the instruction to use only the passages. Rerun step 2. What changes?</li>
+    <li>For three wrong or refused answers, diagnose the stage: retrieval, ranking, generation or abstention.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l17-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l17-r1"><label for="r1"><b>Required.</b> Lewis et al. (2020), <a href="https://arxiv.org/abs/2005.11401">Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</a>. Read the introduction. The paper that named the pattern.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l17-r2"><label for="r2"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the information retrieval chapter: the sections on retrieval-augmented generation and on evaluating question answering.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l17-r3"><label for="r3"><b>Optional.</b> Es et al. (2023), <a href="https://arxiv.org/abs/2309.15217">RAGAS: Automated Evaluation of Retrieval Augmented Generation</a>. Read how they define faithfulness, answer relevance and context relevance, and compare with the table in section 6.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 18:</b> a user asks <span class="ar">ما هو المثنى؟</span> Your corpus is entirely in English. Walk through your pipeline stage by stage. Which stage breaks first, and which stages still work?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w08-l16-rerank.html">← Lesson 16</a> · <a href="../index.html">Course map</a> · <a href="w09-l18-crosslingual.html">Lesson 18 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson17.js"></script>
+</body>
+</html>

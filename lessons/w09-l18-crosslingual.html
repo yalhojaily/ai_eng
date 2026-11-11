@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 18: Cross-lingual retrieval</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 4 · Week 9 · Lesson 18 · about 75 minutes</div>
+    <h1>Cross-lingual retrieval</h1>
+    <p class="lede">Most of the world's technical writing is in a handful of languages, and most of the world's people ask questions in others. A system that lets someone ask in Arabic and be answered from English sources is among the most useful things you can build with these tools, and the hardest test of everything in this phase.</p>
+    <ul class="toc">
+      <li><a href="#wall">1 The wall</a></li>
+      <li><a href="#three">2 Three strategies</a></li>
+      <li><a href="#space">3 One space</a></li>
+      <li><a href="#pitfalls">4 Pitfalls</a></li>
+      <li><a href="#answer">5 Answering</a></li>
+      <li><a href="#measure">6 Measuring</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+      <li><a href="#project">Project</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain why word matching fails completely across languages and what still works.</li>
+      <li>Compare query translation, document translation and multilingual embeddings.</li>
+      <li>Name the linguistic traps in translating a search query.</li>
+      <li>Measure retrieval per language and report the gap.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> BM25 breaks first and completely: an Arabic query shares no tokens with English text, so every score is zero. Dense retrieval with a multilingual model still works, to a degree. The reranker works if it is multilingual. Generation works, since large models read both languages. So the failure is concentrated at the very first stage, which is where this lesson concentrates.</div>
+
+  <h2 id="wall">1. The lexical wall</h2>
+  <p>Lesson 13's vocabulary mismatch was a matter of degree: paraphrases share <i>some</i> words. Across scripts the mismatch is total.</p>
+
+  <div class="try" id="ov">
+    <span class="label">Try it · 1</span>
+    <h3>Count the shared words</h3>
+    <label class="field"><span>Passage</span><input id="ov-p" type="text" value="The dual is a number value for exactly two things."></label>
+    <label class="field"><span>Query</span><input id="ov-q" type="text" dir="auto" value="what is the dual number"></label>
+    <div class="row" id="ov-presets"></div>
+    <div class="out" id="ov-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice the fourth preset.</b> Bilingual speakers often keep the technical term in English inside an Arabic sentence. Linguists call this <b>code-switching</b>. Here it rescues word matching by accident, which is a reason to keep BM25 in a cross-lingual pipeline.</p>
+  </div>
+
+  <h2 id="three">2. Three ways through the wall</h2>
+  <table>
+    <tr><th>Strategy</th><th>How</th><th>Strength</th><th>Weakness</th></tr>
+    <tr><td><b>Translate the query</b></td><td>a model turns the Arabic query into English, then search as usual</td><td>all your English machinery works again, BM25 included</td><td>one extra model call; a mistranslated query retrieves confidently wrong passages</td></tr>
+    <tr><td><b>Translate the documents</b></td><td>translate the corpus into Arabic at indexing time and index both</td><td>no translation at query time; BM25 works in Arabic</td><td>costly for large corpora; must be redone when documents change; translation errors are baked in</td></tr>
+    <tr><td><b>Multilingual embeddings</b></td><td>embed query and passages with one model that covers both languages</td><td>no translation at all; simple</td><td>dense only; quality varies by language pair; rare terms suffer</td></tr>
+  </table>
+  <p>These are retrievers with different failure modes, so the lesson of Lesson 15 applies directly: run more than one and fuse the rankings. A common and strong design is multilingual dense search on the original query, plus BM25 and dense search on a translated query, combined by reciprocal rank fusion and then reranked.</p>
+  <div class="try">
+    <span class="label">Try it · 2</span>
+    <h3>Pick a strategy</h3>
+    <div id="st-box"></div>
+  </div>
+
+  <h2 id="space">3. How one model can embed two languages</h2>
+  <p>Lesson 2's embeddings put texts with similar meanings close together. A multilingual embedding model extends "similar meaning" across languages: a sentence and its translation should land on nearly the same point. Such models are trained on large numbers of <b>translation pairs</b>, with an objective that pulls each pair together and pushes unrelated sentences apart. One well-known recipe starts from a good English model and trains a multilingual student to reproduce the English model's vector both for an English sentence and for its translation.</p>
+  <p>The result is a shared space, and it is not equally good everywhere. Languages with plenty of parallel text are aligned well. Others are aligned loosely. And specialised vocabulary, the grammatical terms your corpus is full of, is thinly represented in any general training set. This is Lesson 1's language tax appearing in a third currency: first tokens, then cost, now retrieval quality.</p>
+
+  <h2 id="pitfalls">4. What goes wrong in translation</h2>
+  <p>Translating a search query is harder than translating a paragraph, because a query is short and has no context to settle its meaning.</p>
+  <ul>
+    <li><b>Terms of art.</b> Arabic grammar has its own precise, centuries-old vocabulary. <span class="ar">المثنى</span> is "the dual", not "the double" or "the second". A general translation that misses the technical sense retrieves nothing useful.</li>
+    <li><b>Ambiguity.</b> One word, several readings: <span class="ar">ذهب</span> again, or <span class="ar">عين</span>, which may be an eye, a spring of water, or a spy. A paragraph would decide; a two-word query does not.</li>
+    <li><b>Categories that do not line up.</b> The traditions carve grammar differently. Arabic grammar sorts words into three classes, <span class="ar">اسم</span>, <span class="ar">فعل</span> and <span class="ar">حرف</span>; Universal Dependencies has seventeen tags. A question about <span class="ar">حرف</span> maps to several English terms at once.</li>
+    <li><b>Names.</b> Proper names cross scripts by sound, in several competing spellings, and word matching treats each spelling as a different word.</li>
+    <li><b>Varieties.</b> A query in a regional dialect, against a model trained mostly on formal written Arabic, is a further step away.</li>
+  </ul>
+  <div class="try">
+    <span class="label">Try it · 3</span>
+    <h3>Match the term</h3>
+    <div id="tm-box"></div>
+  </div>
+  <p>The practical defence is to stop asking for <i>the</i> translation. Ask the model for two or three, covering the technical sense and any other plausible readings, search with all of them, and fuse. This is called <b>query expansion</b>, and it helps in a single language too.</p>
+
+  <h2 id="answer">5. Answering across languages</h2>
+  <p>Generation adds its own decisions:</p>
+  <ul>
+    <li><b>Answer in the user's language.</b> State it in the prompt. Left alone, a model facing English passages often drifts into English.</li>
+    <li><b>Quote in the source language.</b> The citation gate from Lesson 17 checks quotes character by character, so quotes must stay exactly as written. Show the original quote, with a translation beside it clearly marked as a translation.</li>
+    <li><b>Keep technical terms recoverable.</b> Give the Arabic term with the English one in brackets on first use, so the reader can search the sources themselves.</li>
+    <li><b>Check faithfulness across languages.</b> The judge now decides whether an English quote entails an Arabic sentence. Validate it on bilingual examples you label yourself; do not assume your English kappa carries over.</li>
+  </ul>
+
+  <h2 id="measure">6. Measure by language, always</h2>
+  <p>An overall score for a bilingual system is an average of two different systems. Report every metric from Lessons 16 and 17 separately for each query language, and state the gap. That gap is the cost your non-English users are paying, and a number you can drive down: with a better multilingual model, with query translation, with a glossary of terms added to the translation prompt.</p>
+  <p>A useful experiment is the <b>translation ceiling</b>. Translate your Arabic test queries into English yourself, carefully, and run those. The score you get is roughly the best any query-translation approach could reach. The distance between it and your automatic pipeline tells you how much is lost in translation, as opposed to retrieval.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: ask in Arabic, retrieve in English</h2>
+  <p><b>Time:</b> 2 hours. Use the 15 Arabic queries from Lesson 16 and the whole stack so far.</p>
+<pre><code>TRANSLATE_SCHEMA = {
+    "type": "object",
+    "properties": {"translations": {"type": "array", "items": {"type": "string"}}},
+    "required": ["translations"], "additionalProperties": False,
+}
+
+TRANSLATE_SYSTEM = """You translate search queries from Arabic into English.
+The queries will be run against documentation about grammar and the
+Universal Dependencies annotation scheme.
+... your briefing: use the standard English linguistic term where one
+exists; give up to three translations; if a word is ambiguous, cover
+the different readings; a short glossary of terms ...
+"""
+
+def translate_query(q):
+    return call_json(TRANSLATE_SYSTEM, f"&lt;query&gt;{q}&lt;/query&gt;",
+                     TRANSLATE_SCHEMA, "translations")["translations"]
+
+def strategies(q):
+    en = translate_query(q)
+    return {
+        "direct dense":    dense_search(q, 50),
+        "translate+bm25":  rrf([bm25_search(t, 50) for t in en], top=50),
+        "translate+dense": rrf([dense_search(t, 50) for t in en], top=50),
+        "all fused":       rrf([dense_search(q, 50)]
+                               + [bm25_search(t, 50) for t in en]
+                               + [dense_search(t, 50) for t in en], top=50),
+    }</code></pre>
+  <ol>
+    <li>Compute recall@5, recall@20 and MRR for the four strategies on the Arabic queries, with and without the reranker. One table.</li>
+    <li>Put the best Arabic row next to your English results from Lesson 16. How large is the gap?</li>
+    <li><b>Translation ceiling.</b> Translate the 15 queries into English by hand and run them through plain hybrid search. How much of the gap is translation, how much retrieval?</li>
+    <li>Read the model's translations for every query that failed. Label each failure: term of art, ambiguity, category mismatch, or retrieval after a correct translation.</li>
+    <li>Add six entries to the glossary in <code>TRANSLATE_SYSTEM</code>, drawn from those failures. Rerun and read the flips.</li>
+    <li>Extend Lesson 17's <code>answer</code> so that the answer is in Arabic while the quotes stay in English. Does the citation gate still pass? Label ten Arabic sentence and English quote pairs for faithfulness and measure your judge's kappa on them.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l18-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l18-r1"><label for="r1"><b>Required.</b> Reimers &amp; Gurevych (2020), <a href="https://arxiv.org/abs/2004.09813">Making Monolingual Sentence Embeddings Multilingual using Knowledge Distillation</a>. Read the introduction and the method section: it is the recipe described in section 3, and the origin of the model you have been using.</li>
+    <li><input type="checkbox" id="r2" data-save="l18-r2"><label for="r2"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the machine translation chapter: the section on language divergences and typology, on the ways languages differ that make translation hard.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l18-r3"><label for="r3"><b>Optional.</b> Wang et al. (2024), <a href="https://arxiv.org/abs/2402.05672">Multilingual E5 Text Embeddings: A Technical Report</a>. A short description of how a current family of multilingual embedding models is trained and evaluated.</label></li>
+  </ul>
+
+  <h2 id="project">Phase 4 project: ship the cross-lingual search</h2>
+  <p>Assemble Lessons 13 to 18 into one system: <b>ask a question about grammar in Arabic or English, and get an answer in the same language, grounded in an English corpus, with checkable citations.</b></p>
+  <div class="card">
+    <h3>What to build</h3>
+    <ol>
+      <li>An indexing script: load, chunk with heading paths, embed, store, with the settings recorded.</li>
+      <li>A search function: hybrid retrieval with normalisation, query translation and expansion for Arabic, fusion, reranking.</li>
+      <li>An answer function: structured output with citations and quotes, the citation gate, and abstention.</li>
+      <li>A command-line interface: a question in, an answer with its sources out.</li>
+      <li>The eval, in your harness: retrieval metrics per language, citation-gate pass rate, judged faithfulness, abstention on unanswerable questions.</li>
+    </ol>
+    <h3>What to hand in</h3>
+    <ul class="check">
+      <li><input type="checkbox" id="p1" data-save="p4-a"><label for="p1">The repository, with a README showing one English and one Arabic question answered.</label></li>
+      <li><input type="checkbox" id="p2" data-save="p4-b"><label for="p2">The query set: at least 40 queries with relevant chunk IDs, half Arabic, including five unanswerable ones, split into development and test.</label></li>
+      <li><input type="checkbox" id="p3" data-save="p4-c"><label for="p3">A results table: BM25, dense, hybrid and hybrid with reranking, by language, with recall@5, recall@20 and MRR.</label></li>
+      <li><input type="checkbox" id="p4" data-save="p4-d"><label for="p4">The Arabic–English gap, the translation ceiling, and what you did that narrowed the gap most.</label></li>
+      <li><input type="checkbox" id="p5" data-save="p4-e"><label for="p5">Faithfulness and abstention results, and your judge's kappa in each language.</label></li>
+      <li><input type="checkbox" id="p6" data-save="p4-f"><label for="p6">One page: three failures you could not fix, each diagnosed to its stage.</label></li>
+    </ul>
+    <p class="small" style="margin:0">Send me the link and the page. In Phase 5 this search system becomes one of the tools an agent can call.</p>
+  </div>
+
+  <div class="note"><b>Bring to Lesson 19:</b> your pipeline retrieves once and then answers. Some questions need two lookups, where what to look up second depends on what the first one found. What would have to change for the system to handle that?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w09-l17-rag.html">← Lesson 17</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson18.js"></script>
+</body>
+</html>

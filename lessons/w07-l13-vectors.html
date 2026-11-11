@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 13: From word counts to dense vectors</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 4 · Week 7 · Lesson 13 · about 70 minutes</div>
+    <h1>From word counts to dense vectors</h1>
+    <p class="lede">A model knows only what is in its parameters and what is in its context. Retrieval is how you put the right pages into the context, out of thousands it has never seen. This phase builds a search engine, and measures it from the first day.</p>
+    <ul class="toc">
+      <li><a href="#problem">1 The problem</a></li>
+      <li><a href="#sparse">2 Counting words</a></li>
+      <li><a href="#tfidf">3 tf-idf</a></li>
+      <li><a href="#mismatch">4 The mismatch</a></li>
+      <li><a href="#dense">5 Dense retrieval</a></li>
+      <li><a href="#which">6 Which, when</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>State the retrieval problem and why selection beats stuffing the context.</li>
+      <li>Compute tf-idf by hand and explain what each half contributes.</li>
+      <li>Explain the vocabulary mismatch problem and how dense retrieval addresses it.</li>
+      <li>Predict which kind of query favours word matching and which favours embeddings.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> You cannot paste five thousand pages into a prompt, and Lesson 7 showed you would not want to. A program has to score every passage for relevance to the sentence in hand and keep the top few. That scoring-and-selecting step is <b>retrieval</b>, and it is Lesson 7's "select" move, automated.</div>
+
+  <h2 id="problem">1. The retrieval problem</h2>
+  <p>Given a <b>query</b> and a large collection of <b>documents</b>, return the few documents most useful for answering the query, quickly. Every search engine solves this. In AI engineering it sits in front of a model: retrieved passages are placed in the context, and the model answers from them. The pattern is called <b>retrieval-augmented generation</b>, or RAG, and Lesson 17 assembles it.</p>
+  <p>The scoring function has to be cheap, because it runs against the whole collection. So the standard design turns every document into a vector <i>ahead of time</i>, turns the query into a vector when it arrives, and compares vectors. Everything in this lesson is a choice of how to build those vectors.</p>
+
+  <h2 id="sparse">2. The oldest idea: count the words</h2>
+  <p>Represent a document by which words it contains and how often, ignoring their order. This is the <b>bag of words</b>. Put every document's counts side by side and you have a <b>term-document matrix</b>: one row per vocabulary word, one column per document.</p>
+  <p>You have seen this object before. In Lesson 2 a word was described by the words around it. Here a word is described by the <i>documents</i> it appears in, and a document by the words in it. It is the distributional idea again, at a larger scale. Because most words are absent from most documents, nearly every entry is zero, so these are <b>sparse</b> vectors.</p>
+
+  <h2 id="tfidf">3. Not all words are equal: tf-idf</h2>
+  <p>Raw counts have an obvious flaw. <i>The</i> appears everywhere and says nothing; <i>dual</i> appears in few documents and says a lot. The classic fix weights each word by two factors:</p>
+  <ul>
+    <li><b>Term frequency (tf)</b>: how often the word occurs in this document. More occurrences, more relevant.</li>
+    <li><b>Inverse document frequency (idf)</b>: how rare the word is across the collection, <code>log(N / df)</code>, where N is the number of documents and df is how many contain the word. A word in every document gets <code>log(1) = 0</code> and vanishes.</li>
+  </ul>
+  <p>The weight is their product, and documents are ranked by the cosine between the query's vector and each document's, exactly as in Lesson 2.</p>
+
+  <div class="try" id="tf">
+    <span class="label">Try it · 1</span>
+    <h3>A search engine in forty lines</h3>
+    <p class="small">Eight tiny documents about grammar. Everything is computed live by tf-idf and cosine.</p>
+    <label class="field"><span>Query</span><input id="tf-q" type="text" value="dual number"></label>
+    <div class="row" id="tf-presets"></div>
+    <div class="out" id="tf-terms" aria-live="polite"></div>
+    <div id="tf-results"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Try <code>the noun</code> and look at each word's idf. Try <code>plural</code>. Then try <code>more than one</code>, which means the same thing as <i>plural</i>. Finally try <code>two things</code> and <code>pair</code>.</p>
+  </div>
+
+  <h2 id="mismatch">4. The vocabulary mismatch problem</h2>
+  <p>The last experiments show the central weakness of word matching. The document about the plural is the right answer to <i>more than one</i>, and it scores zero, because it shares no word with the query. People describe the same thing in different words far more often than intuition suggests. A searcher who does not already know the term of art cannot find the page that defines it.</p>
+  <p>The same wall appears as:</p>
+  <ul>
+    <li><b>Synonyms and paraphrase</b>: <i>plural</i> / <i>more than one</i>.</li>
+    <li><b>Morphology</b>: <i>write</i> / <i>wrote</i>; <span class="ar">كتاب</span> / <span class="ar">وكتابها</span>. Lesson 15 deals with this.</li>
+    <li><b>Language</b>: an Arabic query against English text shares no words at all. Lesson 18 deals with this.</li>
+  </ul>
+
+  <h2 id="dense">5. Dense retrieval</h2>
+  <p>Lesson 2 ended with embedding models: networks that read a whole passage and return one dense vector, placing passages with similar meanings near each other. Use that vector in place of word counts and you have <b>dense retrieval</b>:</p>
+  <div class="flow" aria-label="Offline: embed every chunk and store. Online: embed the query, find nearest vectors.">
+    <div class="box">documents<small>offline, once</small></div><span class="arr">→</span>
+    <div class="box">embed<small>one vector each</small></div><span class="arr">→</span>
+    <div class="box">index<small>stored vectors</small></div>
+  </div>
+  <div class="flow">
+    <div class="box">query<small>at request time</small></div><span class="arr">→</span>
+    <div class="box">embed<small>same model</small></div><span class="arr">→</span>
+    <div class="box">nearest<small>by cosine</small></div><span class="arr">→</span>
+    <div class="box">top k</div>
+  </div>
+  <p>Because query and document are embedded separately by the same model, this design is called a <b>bi-encoder</b>. Its great advantage is that all the expensive work on documents is done once. At query time you embed one short text and compare numbers.</p>
+  <p>For a few thousand vectors, comparing the query with every one is instant, and that is what you will do. For millions, systems use an <b>approximate nearest neighbour</b> index, which finds almost all of the closest vectors while looking at a small fraction of them. Vector databases are, at heart, that index plus storage. You do not need one until brute force is too slow, and you should measure before deciding it is.</p>
+
+  <h2 id="which">6. Neither wins everywhere</h2>
+  <table>
+    <tr><th></th><th>Sparse (word matching)</th><th>Dense (embeddings)</th></tr>
+    <tr><td>Paraphrase, synonyms</td><td>fails</td><td>strong</td></tr>
+    <tr><td>Exact terms, codes, rare names</td><td>strong</td><td>can blur them</td></tr>
+    <tr><td>Text unlike its training data</td><td>unaffected</td><td>degrades</td></tr>
+    <tr><td>Explaining a result</td><td>easy: these words matched</td><td>hard</td></tr>
+    <tr><td>Cost to build</td><td>trivial</td><td>embed everything; redo if the model changes</td></tr>
+  </table>
+  <div class="try">
+    <span class="label">Try it · 2</span>
+    <h3>Which retriever would you bet on?</h3>
+    <div id="bet-box"></div>
+  </div>
+  <p>Because their failures are different, the two are usually combined. That is Lesson 15. First you need documents of a sensible size to retrieve, which is Lesson 14.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: two retrievers over a real corpus</h2>
+  <p><b>Time:</b> 75 minutes. The corpus for this phase is the documentation of Universal Dependencies itself: clone the <code>UniversalDependencies/docs</code> repository from GitHub and use the Markdown files under its <code>_u-pos</code>, <code>_u-feat</code> and <code>_u-dep</code> folders (if the layout has changed, pick any folders of guideline pages). You may use a different corpus you care about, as long as it has at least a hundred pages. <code>pip install numpy sentence-transformers</code>.</p>
+<pre><code>import glob, math, re
+import numpy as np
+from collections import Counter
+from sentence_transformers import SentenceTransformer
+
+paths = sorted(glob.glob("docs/_u-*/*.md"))
+docs = [open(p, encoding="utf-8").read() for p in paths]
+tokenize = lambda s: re.findall(r"\w+", s.lower())
+
+# --- sparse: tf-idf from scratch ---
+df = Counter(t for d in docs for t in set(tokenize(d)))
+idf = {t: math.log(len(docs) / n) for t, n in df.items()}
+vocab = {t: i for i, t in enumerate(idf)}
+
+def tfidf(text):
+    v = np.zeros(len(vocab))
+    for t, n in Counter(tokenize(text)).items():
+        if t in vocab:
+            v[vocab[t]] = n * idf[t]
+    norm = np.linalg.norm(v)
+    return v / norm if norm else v
+
+S = np.array([tfidf(d) for d in docs])
+
+# --- dense ---
+model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+D = model.encode(docs, normalize_embeddings=True, show_progress_bar=True)
+
+def search(query, k=5):
+    sparse = np.argsort(-(S @ tfidf(query)))[:k]
+    dense = np.argsort(-(D @ model.encode(query, normalize_embeddings=True)))[:k]
+    return [paths[i] for i in sparse], [paths[i] for i in dense]
+
+for q in ["dual number", "a word for exactly two things", "SCONJ",
+          "how do I tag the verb to be"]:
+    s, d = search(q)
+    print(q, "\n  sparse:", s[:3], "\n  dense: ", d[:3])</code></pre>
+  <ol>
+    <li>Write ten queries of your own: five using the guidelines' exact terms, five describing the same things in everyday words. Run all ten through both retrievers.</li>
+    <li>For each query, mark whether the right page is in each retriever's top three. Fill in a two-by-two table: term queries and everyday queries, sparse and dense.</li>
+    <li>Which words have the five lowest and five highest idf values in this corpus? Do they match your intuition about informative words?</li>
+    <li>Try one query in Arabic, for example <span class="ar">ما هو المثنى؟</span>. What does each retriever return? Keep the result for Lesson 18.</li>
+    <li>These pages vary greatly in length, and the embedding model reads only a limited number of tokens of each. Note any long page that dense retrieval misses. Lesson 14 is about that.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l13-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l13-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the vector semantics chapter: the sections on the term-document matrix and tf-idf that you skimmed in Week 1.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l13-r2"><label for="r2"><b>Required.</b> The same book's chapter on information retrieval and retrieval-augmented generation: the opening sections on the retrieval task and on dense retrieval with bi-encoders.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l13-r3"><label for="r3"><b>Optional.</b> Karpukhin et al. (2020), <a href="https://arxiv.org/abs/2004.04906">Dense Passage Retrieval for Open-Domain Question Answering</a>. Read the introduction, for the argument that learned dense vectors can beat word matching.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 14:</b> you embedded each page as a single vector. One page is forty paragraphs long and the answer to a question is in paragraph thirty. Name two things that go wrong.</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w06-l12-regression.html">← Lesson 12</a> · <a href="../index.html">Course map</a> · <a href="w07-l14-chunking.html">Lesson 14 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson13.js"></script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 16: Reranking and retrieval metrics</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 4 · Week 8 · Lesson 16 · about 75 minutes</div>
+    <h1>Reranking and retrieval metrics</h1>
+    <p class="lede">Phase 3 taught you never to trust a system you have not measured. Retrieval gets its own eval, with its own metrics, and once you can measure it you can afford a second, slower, much sharper stage.</p>
+    <ul class="toc">
+      <li><a href="#data">1 The dataset</a></li>
+      <li><a href="#metrics">2 Metrics</a></li>
+      <li><a href="#which">3 Which one</a></li>
+      <li><a href="#cross">4 Cross-encoders</a></li>
+      <li><a href="#two">5 Two stages</a></li>
+      <li><a href="#tune">6 Tuning</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Build an evaluation set for retrieval: queries with their relevant chunks.</li>
+      <li>Compute recall@k, precision@k, MRR and nDCG, and say what each is for.</li>
+      <li>Explain why a cross-encoder ranks better than a bi-encoder and why it cannot be used alone.</li>
+      <li>Design a retrieve-then-rerank pipeline and choose its two cut-offs.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> The same three things as in Lesson 9: fixed inputs, known answers, a scoring function. For retrieval the inputs are queries, the known answers are the IDs of the chunks that are relevant to each query, and the scoring function looks at where those IDs appear in the ranked results.</div>
+
+  <h2 id="data">1. An eval set for retrieval</h2>
+  <p>Each item is a query plus the set of chunk IDs a good system should return. Information-retrieval researchers call these relevance judgements, and they have been building such collections since the 1960s. Three practical ways to get yours:</p>
+  <ul>
+    <li><b>From questions to chunks.</b> Write real questions, search by every means you have, and record the chunks that answer each. Slow, and the most faithful to real use.</li>
+    <li><b>From chunks to questions.</b> Pick a chunk and write a question that it answers. Fast, and you know one relevant chunk for certain. The danger is questions that copy the chunk's wording, which makes word matching look better than it is. Paraphrase on purpose.</li>
+    <li><b>Generated, then checked.</b> Have a model write questions for sampled chunks, then review them yourself, discarding the vague and the copied. This is Lesson 11's rule again: a model can draft the labels, but a person must validate them.</li>
+  </ul>
+  <p>Include queries in every style and language your users will use, and tag each with its type, so that you can report results per group as in Lesson 9.</p>
+
+  <h2 id="metrics">2. Four metrics for a ranked list</h2>
+  <p>A retriever returns an ordered list, so its metrics care about <i>position</i>. All are computed at a cut-off k: only the top k results count.</p>
+  <ul>
+    <li><b>Recall@k</b>: of all the relevant chunks, what share appear in the top k?</li>
+    <li><b>Precision@k</b>: of the top k, what share are relevant?</li>
+    <li><b>MRR</b> (mean reciprocal rank): 1 divided by the position of the first relevant result, averaged over queries. First place gives 1, second 0.5, tenth 0.1.</li>
+    <li><b>nDCG@k</b>: rewards relevant results more the higher they are placed, then divides by the best possible score so the result lies between 0 and 1.</li>
+  </ul>
+
+  <div class="try" id="met">
+    <span class="label">Try it · 1</span>
+    <h3>Score a ranking</h3>
+    <p class="small">Ten results, in ranked order. Tap a result to mark it relevant or not.</p>
+    <div id="mt-list" class="row" style="gap:6px"></div>
+    <div class="row"><label for="mt-k" class="small" style="min-width:150px">Cut-off k <b id="mt-kv">5</b></label><input id="mt-k" type="range" min="1" max="10" step="1" value="5"></div>
+    <label class="field"><span>Relevant chunks that exist in the whole corpus</span><input id="mt-total" type="number" min="1" max="20" value="4"></label>
+    <div class="out" id="mt-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Mark only result 1 relevant, then only result 5. Recall@5 is the same in both cases; which metrics tell them apart? Now raise k from 5 to 10 with three relevant results in the list: recall rises and precision falls. That tension is the same one as in Lesson 10.</p>
+  </div>
+
+  <h2 id="which">3. Which metric to watch</h2>
+  <p>It depends on what consumes the results.</p>
+  <ul>
+    <li><b>A person scanning a results page</b> looks at the top few. MRR and nDCG matter most.</li>
+    <li><b>A language model reading the top k</b> reads all of them, in any order. What matters first is whether the needed chunk is among them at all: <b>recall@k</b>, at the k you actually pass to the model. A chunk that was not retrieved cannot be used, whatever the model's talents.</li>
+  </ul>
+  <p>For RAG, then, recall@k is the headline number for the first stage. Precision still matters, because irrelevant chunks cost tokens and distract (Lesson 7), and that is what the second stage is for.</p>
+
+  <h2 id="cross">4. A sharper tool: the cross-encoder</h2>
+  <p>A bi-encoder compresses the passage into one vector before it has seen the query. Whatever the query turns out to need, the vector was fixed in advance. A <b>cross-encoder</b> instead reads the query and the passage <i>together</i>, as one input, and outputs a single relevance score. Every word of the query can attend to every word of the passage, the mechanism that makes embeddings contextual in Lesson 2. It can notice that <i>not</i> reverses the meaning, or that the passage mentions the right term in the wrong sense.</p>
+  <table>
+    <tr><th></th><th>Bi-encoder</th><th>Cross-encoder</th></tr>
+    <tr><td>Reads query and passage</td><td>separately</td><td>together</td></tr>
+    <tr><td>Passage work done in advance</td><td>yes</td><td>none possible</td></tr>
+    <tr><td>Cost per query</td><td>one embedding + fast comparisons</td><td>one model run per candidate passage</td></tr>
+    <tr><td>Ranking quality</td><td>good</td><td>better</td></tr>
+  </table>
+  <p>The catch is in the third row. Nothing can be precomputed, so scoring a million chunks means a million model runs per query.</p>
+
+  <h2 id="two">5. Retrieve, then rerank</h2>
+  <p>So use both, in order. A fast first stage (your hybrid search) narrows the corpus to a shortlist. The cross-encoder then <b>reranks</b> only that shortlist, and the best few go to the model.</p>
+  <div class="flow" aria-label="Corpus to hybrid retrieval top 50 to cross-encoder rerank top 5 to model">
+    <div class="box">corpus<small>100,000 chunks</small></div><span class="arr">→</span>
+    <div class="box">hybrid search<small>top 50</small></div><span class="arr">→</span>
+    <div class="box">rerank<small>top 5</small></div><span class="arr">→</span>
+    <div class="box">model</div>
+  </div>
+
+  <div class="try" id="fun">
+    <span class="label">Try it · 2</span>
+    <h3>Why not rerank everything?</h3>
+    <div class="row"><label for="fn-n" class="small" style="min-width:170px">Chunks in corpus <b id="fn-nv"></b></label><input id="fn-n" type="range" min="3" max="7" step="0.25" value="5"></div>
+    <div class="row"><label for="fn-k" class="small" style="min-width:170px">Shortlist size <b id="fn-kv">50</b></label><input id="fn-k" type="range" min="10" max="200" step="10" value="50"></div>
+    <div class="row"><label for="fn-ms" class="small" style="min-width:170px">Cross-encoder time per pair <b id="fn-mv">20</b> ms</label><input id="fn-ms" type="range" min="2" max="60" step="2" value="20"></div>
+    <div class="out" id="fn-out" aria-live="polite"></div>
+    <p class="small" style="margin:0">Timings are simple multiplication, assuming pairs are scored one after another and the first stage takes about 30 ms. Real systems batch pairs on a GPU, which changes the constants and not the conclusion.</p>
+  </div>
+  <p>The two stages have different jobs, and so different metrics. The first stage must not lose the answer: tune it for <b>recall</b> at the shortlist size. The reranker must put the answer on top: judge it by <b>MRR or nDCG</b> at the final cut-off. A reranker can only reorder what it is given. If the right chunk is not in the shortlist, no reranker will find it.</p>
+  <p>You can also use a general language model as the reranker, asking it to score or order the shortlist. It is slower and costlier per query than a small cross-encoder, and sometimes better. With an eval set you can find out which holds for you.</p>
+
+  <h2 id="tune">6. Everything is now a tunable parameter</h2>
+  <p>With a retrieval eval in place, the guesses of the last three lessons become experiments: chunk size, heading prefixes, the normaliser, k1 and b, the fusion constant, the shortlist size, the reranker. Change one, rerun, read the diff (Lesson 12). Two cautions carry over from Phase 3. Tune on a development set of queries and keep a test set back. And look at failures, not only totals: a query whose answer is never retrieved usually points to a chunking or vocabulary problem that no parameter will fix.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: measure four retrievers</h2>
+  <p><b>Time:</b> 2 hours, mostly spent writing good queries. Build <code>data/queries.jsonl</code> with 30 queries over your corpus: 15 in English and 15 in Arabic, each with the IDs of its relevant chunks and a <code>type</code> field (<code>term</code>, <code>paraphrase</code> or <code>arabic</code>).</p>
+<pre><code>import json
+from sentence_transformers import CrossEncoder
+
+reranker = CrossEncoder("cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")   # multilingual
+
+def rerank(query, candidates, top=5):
+    scores = reranker.predict([(query, texts[i]) for i in candidates])
+    order = sorted(zip(scores, candidates), reverse=True)
+    return [i for _, i in order][:top]
+
+def recall_at(ranked_ids, relevant, k):
+    return len(set(ranked_ids[:k]) &amp; relevant) / len(relevant)
+
+def reciprocal_rank(ranked_ids, relevant):
+    for pos, cid in enumerate(ranked_ids, start=1):
+        if cid in relevant:
+            return 1 / pos
+    return 0.0
+
+queries = [json.loads(l) for l in open("data/queries.jsonl", encoding="utf-8")]
+ids = [c["id"] for c in chunks]
+
+systems = {
+    "bm25":   lambda q: bm25_search(q, 50),
+    "dense":  lambda q: dense_search(q, 50),
+    "hybrid": lambda q: rrf([bm25_search(q, 50), dense_search(q, 50)], top=50),
+    "hybrid+rerank": lambda q: rerank(q, rrf([bm25_search(q, 50), dense_search(q, 50)], top=50), top=50),
+}
+
+for name, fn in systems.items():
+    r5 = r20 = mrr = 0
+    for q in queries:
+        ranked = [ids[i] for i in fn(q["query"])]
+        rel = set(q["relevant"])
+        r5 += recall_at(ranked, rel, 5); r20 += recall_at(ranked, rel, 20)
+        mrr += reciprocal_rank(ranked, rel)
+    n = len(queries)
+    print(f"{name:14} recall@5 {r5/n:.2f}  recall@20 {r20/n:.2f}  MRR {mrr/n:.2f}")</code></pre>
+  <ol>
+    <li>Fill in the four-row table. Then split it by query type. Where does each system win?</li>
+    <li>How much does the reranker add to MRR over plain hybrid? How many seconds per query does it cost on your machine?</li>
+    <li>Find every query whose relevant chunk is missing from the hybrid top 50. For each, write the cause: chunking, vocabulary, language, or a wrong label of your own.</li>
+    <li>Change one setting from an earlier lesson (chunk size, heading prefix, normaliser) and rerun. Use Lesson 12's flips: which queries were fixed, which broke?</li>
+    <li>Add this eval to your harness from Phase 3, with a regression gate on recall@20.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l16-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l16-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the information retrieval chapter: the section on evaluating retrieval systems, including precision, recall and mean average precision.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l16-r2"><label for="r2"><b>Required.</b> Nogueira &amp; Cho (2019), <a href="https://arxiv.org/abs/1901.04085">Passage Re-ranking with BERT</a>. Four pages. The paper that established retrieve-then-rerank with a cross-encoder.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l16-r3"><label for="r3"><b>Optional.</b> Thakur et al. (2021), <a href="https://arxiv.org/abs/2104.08663">BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models</a>. Read the introduction and the main results table: BM25 against dense models across many kinds of text.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 17:</b> suppose retrieval is perfect: the five right passages are in the prompt. The model answers confidently from its own memory instead, and is wrong. How would your program detect that?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w08-l15-hybrid.html">← Lesson 15</a> · <a href="../index.html">Course map</a> · <a href="w09-l17-rag.html">Lesson 17 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson16.js"></script>
+</body>
+</html>
