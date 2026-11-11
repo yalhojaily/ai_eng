@@ -29,16 +29,16 @@ window.COURSE = {
       weeks: [
         { n: 3, title: "Writing prompts that work", ling: "Parts of speech and lemmas",
           lessons: [
-            { id: "l05", title: "Anatomy of a prompt" },
-            { id: "l06", title: "Few-shot examples and task decomposition" }
+            { id: "l05", title: "Anatomy of a prompt", href: "lessons/w03-l5-prompt.html", mins: 70 },
+            { id: "l06", title: "Few-shot examples and task decomposition", href: "lessons/w03-l6-fewshot.html", mins: 70 }
           ],
-          reading: "SLP3, the chapter on sequence labeling for parts of speech" },
+          reading: "SLP3, the chapter on sequence labeling for parts of speech; Brown et al. (2020) on few-shot learning" },
         { n: 4, title: "Context is a budget", ling: "Morphological features: gender, number, case, aspect",
           lessons: [
-            { id: "l07", title: "Choosing what goes in the context window" },
-            { id: "l08", title: "Prompt chains and validation" }
+            { id: "l07", title: "Choosing what goes in the context window", href: "lessons/w04-l7-context.html", mins: 70 },
+            { id: "l08", title: "Prompt chains and validation", href: "lessons/w04-l8-chains.html", mins: 75 }
           ],
-          reading: "Universal Dependencies annotation guidelines: UPOS and features", milestone: "Ship the annotator" }
+          reading: "Universal Dependencies pages on features and on tokenization; Liu et al. (2023), Lost in the Middle", milestone: "Ship the annotator" }
       ]
     },
     {

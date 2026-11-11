@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6: Few-shot examples and task decomposition</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 2 · Week 3 · Lesson 6 · about 70 minutes</div>
+    <h1>Few-shot examples and task decomposition</h1>
+    <p class="lede">Two tools for when instructions alone are not enough: show the model what you want, and give it less to do at once. Both come with a trap.</p>
+    <ul class="toc">
+      <li><a href="#show">1 Showing</a></li>
+      <li><a href="#pairs">2 Minimal pairs</a></li>
+      <li><a href="#choose">3 Choosing</a></li>
+      <li><a href="#traps">4 Traps</a></li>
+      <li><a href="#split">5 Splitting tasks</a></li>
+      <li><a href="#think">6 Room to think</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain what few-shot prompting is and why it works without any training.</li>
+      <li>Build a minimal pair and use it as a teaching example.</li>
+      <li>Choose a small example set that covers the hard distinctions without biasing the model.</li>
+      <li>Decide when to split one prompt into a chain of simpler ones.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> Most people find the pair did the job better. <i>"That book is old"</i> against <i>"I know that it is old"</i> shows the difference in a second, where the rule took three clauses and still left questions. Rules state the boundary; examples show where it runs. You want both.</div>
+
+  <h2 id="show">1. Showing instead of telling</h2>
+  <p>A prompt with instructions and no examples is called <b>zero-shot</b>. Add a few worked examples, input and correct output, and it becomes <b>few-shot</b>. The model's parameters do not change at all: nothing is trained. The examples are just more text in the context, and the model continues the pattern it sees. This is called <b>in-context learning</b>, and it is one of the more surprising abilities of large language models.</p>
+  <p>Examples carry information that is hard to put in words:</p>
+  <ul>
+    <li>the exact output format, down to capitalisation and field order;</li>
+    <li>how fine-grained to be;</li>
+    <li>how to resolve cases where your rules are silent or collide.</li>
+  </ul>
+  <p>There are two common ways to supply them. You can write them inside the system prompt, in tags. Or you can stage them as earlier turns of the conversation: a <code>user</code> message with the input, then an <code>assistant</code> message with the ideal output, repeated. The second form shows the model its own "previous answers" in precisely the format you want next.</p>
+
+  <h2 id="pairs">2. The linguist's example: the minimal pair</h2>
+  <p>Linguists have a standard instrument for isolating one distinction: the <b>minimal pair</b>. Two items identical except for a single feature, where that one difference changes the outcome. <i>Pat</i> and <i>bat</i> differ in one sound and mean different things, which proves that /p/ and /b/ are distinct sounds of English. The same method works for grammar:</p>
+  <table>
+    <tr><th>Pair</th><th>What differs</th><th>What it shows</th></tr>
+    <tr><td><i>She can <b>fish</b>.</i><br><i>She cans <b>fish</b>.</i></td><td>one letter</td><td><i>fish</i> is VERB in the first, NOUN in the second; <i>can</i> flips from AUX to VERB</td></tr>
+    <tr><td><span class="ar">ذهبَ الولد</span><br><span class="ar">ذهبُ الولد</span></td><td>one vowel mark</td><td>"the boy went" (VERB) against "the boy's gold" (NOUN)</td></tr>
+  </table>
+  <p>A minimal pair is the most efficient few-shot example there is. Because everything else is held constant, the model can only attribute the change in output to the feature you care about.</p>
+  <div class="try">
+    <span class="label">Try it · 1</span>
+    <h3>Spot the minimal pair</h3>
+    <div id="mp-box"></div>
+  </div>
+
+  <h2 id="choose">3. Choosing examples under a budget</h2>
+  <p>Every example is input tokens, paid on every single request (Lesson 3). So the question is never "how many examples can I add" but "which few earn their place". Good sets share three properties:</p>
+  <ul>
+    <li><b>They cover the hard cases.</b> The model already tags <i>The cat sleeps</i> correctly. An example of it teaches nothing.</li>
+    <li><b>They show both sides.</b> One example of <i>that</i> as SCONJ, with no contrasting DET, teaches "<i>that</i> is SCONJ".</li>
+    <li><b>They look like real input.</b> Same length, same style, same language mix as what will actually arrive.</li>
+  </ul>
+
+  <div class="try" id="pick">
+    <span class="label">Try it · 2</span>
+    <h3>Build an example set</h3>
+    <p class="small">Tick the examples to include. The panel shows which distinctions your set teaches, and what it costs. This is a rule-of-thumb checker, not a live model.</p>
+    <div id="pk-pool"></div>
+    <div class="out" id="pk-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Challenge.</b> You have a budget of four examples. Which distinctions do you teach, and which do you leave to the written guidelines? There is no perfect answer, which is the point: examples and rules share the work.</p>
+  </div>
+
+  <h2 id="traps">4. The traps</h2>
+  <p>Examples are the strongest signal in a prompt, stronger than instructions. The model copies everything about them, including what you did not intend:</p>
+  <ul>
+    <li><b>Label imbalance.</b> If five of six examples contain a NOUN, expect too many NOUNs.</li>
+    <li><b>Surface copying.</b> If every example is a five-word sentence, long inputs suffer. If every example is English, Arabic suffers.</li>
+    <li><b>Order effects.</b> The last example weighs more than the first. Shuffle and re-test.</li>
+    <li><b>Mistakes are contagious.</b> One wrong tag in an example will be reproduced faithfully. Check examples harder than anything else in the prompt.</li>
+  </ul>
+  <p>When instructions and examples disagree, the examples usually win. So keep them consistent, and when output looks odd, read your examples before you rewrite your rules.</p>
+
+  <h2 id="split">5. Decomposition: give it less to do at once</h2>
+  <p>Some tasks are several tasks in a coat. Arabic tagging is the clearest case. In Universal Dependencies the unit that gets a tag is the <b>syntactic word</b>, and one written Arabic word often contains several: <span class="ar">وكتابها</span>, "and her book", is a conjunction, a noun and a pronoun written without spaces. A prompt that asks for "one tag per word" forces a wrong answer before the model has begun.</p>
+
+  <div class="try" id="dec">
+    <span class="label">Try it · 3</span>
+    <h3>One prompt, or three?</h3>
+    <div class="row">
+      <button class="primary" id="dc-next" type="button">Next step</button>
+      <button id="dc-reset" type="button">Restart</button>
+    </div>
+    <div class="msgs" id="dc-msgs"></div>
+    <div class="stepnote" id="dc-note" aria-live="polite"></div>
+    <p class="small" style="margin:0">Outputs are scripted to show the pattern. You will run the real thing in Lesson 8's lab.</p>
+  </div>
+  <p>Split a task when its parts need different instructions, when an early decision determines everything after it, or when you want to test and fix the parts separately. Do not split when the parts need each other's context to be done well, because each call sees only what you pass along. Lesson 8 is entirely about building and checking such chains.</p>
+
+  <h2 id="think">6. Room to think</h2>
+  <p>A model generates left to right and cannot revise. If the first thing you make it produce is the final answer, it must commit before any reasoning has been written down. Letting it write intermediate steps first often improves hard, multi-step judgements. In structured output this is just a field ordering choice from Lesson 4: put a <code>reasoning</code> field <i>before</i> the answer field.</p>
+  <p>It is not free. Reasoning is output tokens, the expensive kind, and it adds latency. Use it where decisions are hard, such as an ambiguous <span class="ar">ذهب</span>, and skip it for the thousands of easy words. Many current models also offer a built-in "thinking" or "reasoning" mode that does this internally; check your model's documentation for how it is switched on and billed.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: zero-shot against few-shot</h2>
+  <p><b>Time:</b> 75 minutes. Start from Lesson 5's <code>annotate</code> and your best system prompt. Extend your test set to 20 sentences (10 English, 10 Arabic) and tag them by hand first: that hand-tagged set is your <b>gold standard</b>, and you will reuse it in Phase 3.</p>
+<pre><code>EXAMPLES = [
+    ("That book is old.", [
+        {"form": "That", "lemma": "that", "upos": "DET"},
+        {"form": "book", "lemma": "book", "upos": "NOUN"},
+        {"form": "is",   "lemma": "be",   "upos": "AUX"},
+        {"form": "old",  "lemma": "old",  "upos": "ADJ"},
+        {"form": ".",    "lemma": ".",    "upos": "PUNCT"},
+    ]),
+    # add its minimal-pair partner, then more pairs
+]
+
+def annotate_fs(sentence, system, examples):
+    messages = [{"role": "system", "content": system}]
+    for text, tokens in examples:
+        messages.append({"role": "user", "content": f"&lt;sentence&gt;{text}&lt;/sentence&gt;"})
+        messages.append({"role": "assistant",
+                         "content": json.dumps({"tokens": tokens}, ensure_ascii=False)})
+    messages.append({"role": "user", "content": f"&lt;sentence&gt;{sentence}&lt;/sentence&gt;"})
+    r = client.chat.completions.create(
+        model=MODEL, temperature=0, messages=messages,
+        response_format={"type": "json_schema",
+                         "json_schema": {"name": "annotation", "strict": True, "schema": schema}},
+    )
+    return json.loads(r.choices[0].message.content)["tokens"], r.usage.prompt_tokens</code></pre>
+  <ol>
+    <li>Run all 20 sentences with zero, two, and six examples. Record tag errors and average <code>prompt_tokens</code> for each. Fill in a three-row table.</li>
+    <li>Reverse the order of your six examples and rerun. Did any output change?</li>
+    <li>Corrupt one example on purpose: tag a copula as VERB. How many test sentences inherit the mistake?</li>
+    <li>Are your examples all English? Add one Arabic minimal pair and compare the Arabic error count before and after.</li>
+    <li>From the table: what did each avoided error cost you in tokens per request? Would you keep six examples?</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l06-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l06-r1"><label for="r1"><b>Required.</b> Brown et al. (2020), <a href="https://arxiv.org/abs/2005.14165">Language Models are Few-Shot Learners</a>. Read the introduction and the section describing the zero-, one- and few-shot settings. This paper made in-context learning a mainstream idea.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l06-r2"><label for="r2"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the same sequence-labeling chapter as last lesson: now read the section on how tagging accuracy is measured and what the hard cases are.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l06-r3"><label for="r3"><b>Optional.</b> Wei et al. (2022), <a href="https://arxiv.org/abs/2201.11903">Chain-of-Thought Prompting Elicits Reasoning in Large Language Models</a>. Read the introduction and look at the first figure, for section 6 of this lesson.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 7:</b> the full UD guidelines for parts of speech and features run to many pages. Suppose you pasted all of it into every request. Name two things that would get worse.</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w03-l5-prompt.html">← Lesson 5</a> · <a href="../index.html">Course map</a> · <a href="w04-l7-context.html">Lesson 7 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson06.js"></script>
+</body>
+</html>

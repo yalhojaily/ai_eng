@@ -98,6 +98,9 @@
     paint();
   }
 
-  window.Site = { store, el, renderMap, mountQuiz, mountSaved, mountFinish, updateMeter };
+  // Wrap each run of Arabic words in Unicode isolates, so mixed lists such as ["و", "كتاب"] keep their logical order on screen.
+  const iso = s => s.replace(/[\u0600-\u06FF]+(?: [\u0600-\u06FF]+)*/g, m => "\u2068" + m + "\u2069");
+
+  window.Site = { store, el, iso, renderMap, mountQuiz, mountSaved, mountFinish, updateMeter };
   document.addEventListener("DOMContentLoaded", updateMeter);
 })();

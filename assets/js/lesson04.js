@@ -128,7 +128,7 @@
   $("tl-next").onclick = () => {
     const s = LOOP[li++];
     $("tl-msgs").querySelectorAll(".new").forEach(n => n.classList.remove("new"));
-    for (const [role, text, plain] of s.msgs) $("tl-msgs").append(el("div", { class: `msg ${role} new`, dir: "auto", style: "white-space:pre-wrap" }, el("span", { class: "who" }, role), role === "user" || plain ? text : el("code", {}, text)));
+    for (const [role, text, plain] of s.msgs) $("tl-msgs").append(el("div", { class: `msg ${role} new`, dir: "auto", style: "white-space:pre-wrap" }, el("span", { class: "who" }, role), role === "user" || plain ? Site.iso(text) : el("code", {}, Site.iso(text))));
     if (!s.msgs.length) $("tl-msgs").querySelectorAll(".msg").forEach(n => n.classList.add("new"));
     $("tl-note").replaceChildren(el("b", {}, s.actor + ". "), s.note);
     paintLoop(false);

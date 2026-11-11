@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8: Prompt chains and validation</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 2 · Week 4 · Lesson 8 · about 75 minutes</div>
+    <h1>Prompt chains and validation</h1>
+    <p class="lede">One model call is a function. Real applications are programs made of several, with ordinary code between them checking each result. This lesson is about that code as much as the prompts.</p>
+    <ul class="toc">
+      <li><a href="#math">1 Errors multiply</a></li>
+      <li><a href="#pipeline">2 The NLP pipeline</a></li>
+      <li><a href="#gates">3 Gates</a></li>
+      <li><a href="#retry">4 Retry</a></li>
+      <li><a href="#patterns">5 Patterns</a></li>
+      <li><a href="#cost">6 When not to</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+      <li><a href="#project">Project</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Calculate how per-step accuracy compounds along a chain.</li>
+      <li>Write validation gates that check invariants of the task with plain code.</li>
+      <li>Implement retry-with-feedback and know when to stop retrying.</li>
+      <li>Choose between sequential, routing, parallel and generator-critic designs.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> 0.9 × 0.9 × 0.9 × 0.9 = 0.66. Four things done 90% right, independently, leave only about two words in three fully correct. Each part looked fine; the whole does not. That arithmetic governs everything in this lesson.</div>
+
+  <h2 id="math">1. Errors multiply</h2>
+  <p>In a chain, each step works on the output of the one before. A wrong segmentation cannot be rescued by perfect tagging: the tagger is tagging the wrong units. So, roughly, the accuracy of the whole is the <b>product</b> of the accuracies of the steps.</p>
+  <p>That sounds like an argument against chains. It is really an argument for <b>gates</b>: checks between steps that catch a bad result and send it back before it travels further. A gate turns a silent error into a retry.</p>
+
+  <div class="try" id="prop">
+    <span class="label">Try it · 1</span>
+    <h3>Compound it</h3>
+    <div class="row"><label for="pr-a" class="small" style="min-width:170px">Accuracy of each step <b id="pr-av">90%</b></label><input id="pr-a" type="range" min="70" max="99" step="1" value="90"></div>
+    <div class="row"><label for="pr-n" class="small" style="min-width:170px">Steps in the chain <b id="pr-nv">4</b></label><input id="pr-n" type="range" min="1" max="8" step="1" value="4"></div>
+    <div class="row"><label for="pr-c" class="small" style="min-width:170px">Errors a gate catches <b id="pr-cv">0%</b></label><input id="pr-c" type="range" min="0" max="100" step="5" value="0"></div>
+    <div class="bars" id="pr-bars"></div>
+    <div class="out" id="pr-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> At 95% per step, how many steps until the chain is below 75%? Now set the gate to catch 80% of errors. The model assumes one retry per caught error, with the same chance of success as the first attempt.</p>
+  </div>
+
+  <h2 id="pipeline">2. Linguists have always worked in chains</h2>
+  <p>Long before language models, natural language processing was organised as a <b>pipeline</b>, each stage feeding the next:</p>
+  <div class="flow" aria-label="The classic NLP pipeline">
+    <div class="box">tokenise<small>find words</small></div><span class="arr">→</span>
+    <div class="box">segment<small>split clitics</small></div><span class="arr">→</span>
+    <div class="box">tag<small>POS, features</small></div><span class="arr">→</span>
+    <div class="box">lemmatise<small>dictionary form</small></div><span class="arr">→</span>
+    <div class="box">parse<small>structure</small></div>
+  </div>
+  <p>The order is not arbitrary. You cannot tag a unit you have not identified, and you cannot find the lemma of <i>saw</i> until you know whether it is a verb. Each stage also had its own measured accuracy, and the field knew the multiplication problem well: it was called <b>error propagation</b> or cascading errors.</p>
+  <p>A large language model can attempt the whole pipeline in one call. Whether it should is an engineering question with a measurable answer, and you will measure it in the lab.</p>
+
+  <h2 id="gates">3. Gates: check with code, not with hope</h2>
+  <p>A gate is an ordinary function that inspects a step's output and returns either "fine" or a description of what is wrong. The best gates test <b>invariants</b>: properties that must hold for any correct answer, whatever the input.</p>
+  <table>
+    <tr><th>Step</th><th>Invariant a program can check</th></tr>
+    <tr><td>Segment</td><td>The units, joined together, equal the original word exactly. No unit is empty.</td></tr>
+    <tr><td>Tag</td><td>One entry per unit, in the same order, with the same forms. Every tag is in the tagset.</td></tr>
+    <tr><td>Features</td><td>Every feature name and value is in the allowed inventory. A VERB has no <code>Definite</code>.</td></tr>
+    <tr><td>Lemma</td><td>Not empty. Contains no spaces.</td></tr>
+  </table>
+  <p>Notice what these are: cheap, exact, and written once. A code check costs nothing per run and is never wrong about what it checks. Use a model to judge output only for properties code cannot test.</p>
+
+  <div class="try" id="inv">
+    <span class="label">Try it · 2</span>
+    <h3>Run the segmentation gate</h3>
+    <p class="small">The word is <span class="ar">وكتابها</span>. Below is a model's segmentation as JSON. Load a case or edit it; the gate runs live.</p>
+    <div class="row" id="iv-presets"></div>
+    <textarea id="iv-json" spellcheck="false" dir="ltr" style="font-family:var(--mono);min-height:150px"></textarea>
+    <div class="out" id="iv-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Look at the last two cases.</b> “Added vowel marks” is a helpful-looking change that would corrupt your corpus without a gate. And “No split at all” passes every check while being wrong: the invariant holds trivially for one unit. Gates catch malformed answers, not mistaken ones. For those you need Phase 3.</p>
+  </div>
+
+  <h2 id="retry">4. Retry with feedback</h2>
+  <p>When a gate fails, do not simply call again and hope. Tell the model what was wrong, in the gate's own words, and ask again. The error message is new information.</p>
+
+  <div class="try" id="rt">
+    <span class="label">Try it · 3</span>
+    <h3>Watch a gate catch and correct</h3>
+    <div class="row">
+      <button class="primary" id="rt-next" type="button">Next step</button>
+      <button id="rt-reset" type="button">Restart</button>
+    </div>
+    <div class="msgs" id="rt-msgs"></div>
+    <div class="stepnote" id="rt-note" aria-live="polite"></div>
+    <p class="small" style="margin:0">Scripted, to show the control flow you will write in the lab.</p>
+  </div>
+  <p>Three rules keep retries safe. <b>Cap them</b>: one or two attempts, then stop. <b>Fail loudly</b>: when the cap is reached, raise an error or mark the item for a person; never pass a known-bad result downstream. <b>Count them</b>: a step that needs retries on a fifth of its inputs has a prompt problem that retries are hiding.</p>
+
+  <h2 id="patterns">5. Four shapes a chain can take</h2>
+  <ul>
+    <li><b>Sequential.</b> A then B then C, each using the last one's output. The pipeline above.</li>
+    <li><b>Routing.</b> A cheap first step classifies the input, and code sends it to a specialised prompt. Arabic goes to the Arabic guidelines, English to the English ones.</li>
+    <li><b>Parallel.</b> Run several calls at once and combine: split a document into sentences and tag them simultaneously, or ask the same hard question three times and take the majority answer.</li>
+    <li><b>Generator and critic.</b> One call produces, a second reviews against explicit criteria, and the first revises. Useful when "good" can be described but not checked by code.</li>
+  </ul>
+  <div class="try">
+    <span class="label">Try it · 4</span>
+    <h3>Which shape fits?</h3>
+    <div id="pt-box"></div>
+  </div>
+
+  <h2 id="cost">6. When not to chain</h2>
+  <p>Every extra call adds latency and cost, and every boundary is a place where context is lost: step 2 knows only what step 1 passed on. A tagger that receives bare units, without the sentence they came from, has lost the context that decides between <span class="ar">ذهب</span> the verb and <span class="ar">ذهب</span> the noun.</p>
+  <p>So the working rule is: <b>start with one call. Split only where you can name the failure that splitting fixes, and can measure that it did.</b> When you do split, pass forward everything the next step needs, not only the previous step's output.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: a gated chain for Arabic</h2>
+  <p><b>Time:</b> 90 minutes. Build a two-step chain with gates, then compare it with your single-call annotator on the Arabic half of your gold standard.</p>
+<pre><code>def call_json(system, user, schema, name):
+    r = client.chat.completions.create(
+        model=MODEL, temperature=0,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": user}],
+        response_format={"type": "json_schema",
+                         "json_schema": {"name": name, "strict": True, "schema": schema}},
+    )
+    return json.loads(r.choices[0].message.content)
+
+SEG_SCHEMA = {"type": "object",
+              "properties": {"units": {"type": "array", "items": {"type": "string"}}},
+              "required": ["units"], "additionalProperties": False}
+
+def check_segments(word, units):
+    """Return None if fine, otherwise a sentence describing the problem."""
+    if not units or any(u == "" for u in units):
+        return "there is an empty unit"
+    if "".join(units) != word:
+        return "the units joined together must equal the original word exactly, letter for letter"
+    return None
+
+STATS = {"calls": 0, "retries": 0, "failures": 0}
+
+def segment(word, sentence, max_retries=1):
+    user = f"&lt;sentence&gt;{sentence}&lt;/sentence&gt;\n&lt;word&gt;{word}&lt;/word&gt;"
+    for attempt in range(max_retries + 1):
+        STATS["calls"] += 1
+        units = call_json(SEG_SYSTEM, user, SEG_SCHEMA, "segments")["units"]
+        problem = check_segments(word, units)
+        if problem is None:
+            return units
+        STATS["retries"] += 1
+        user += f"\nYour previous answer {units} was rejected: {problem}. Answer again."
+    STATS["failures"] += 1
+    raise ValueError(f"could not segment {word!r}")</code></pre>
+  <ol>
+    <li>Write <code>SEG_SYSTEM</code>: a full briefing for splitting an Arabic written word into its syntactic words, with two or three minimal-pair examples. Note that the sentence is passed along as context.</li>
+    <li>Write step 2, <code>tag(units, sentence)</code>, with its own gate: same number of entries, same forms in the same order, every tag in the tagset.</li>
+    <li>Run the chain on your 10 Arabic gold sentences. Record fully-correct words, total calls, retries, failures and elapsed time.</li>
+    <li>Run your single-call annotator from Lesson 7 on the same sentences. Same measurements.</li>
+    <li>Which is more accurate, and what did the difference cost in calls and seconds? Would routing (chain for Arabic, single call for English) get the best of both?</li>
+    <li>Look at the words the gates passed but your gold standard says are wrong. What kind of mistake gets through?</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l08-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l08-r1"><label for="r1"><b>Required.</b> The Universal Dependencies page on <a href="https://universaldependencies.org/u/overview/tokenization.html">tokenization and word segmentation</a>. It defines the "syntactic word" and explains why clitics are split. This is the specification for your segment step.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l08-r2"><label for="r2"><b>Required.</b> Anthropic's article <a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a>. Read the sections on workflows: prompt chaining, routing, parallelization and evaluator-optimizer. They are the four shapes from section 5.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l08-r3"><label for="r3"><b>Optional.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>: skim the chapter on dependency parsing, to see what the last box of the classic pipeline produces.</label></li>
+  </ul>
+
+  <h2 id="project">Phase 2 project: ship the linguistic annotator</h2>
+  <p>Assemble the four labs into one tool: <b>given a sentence in English or Arabic, return a validated annotation of every syntactic word.</b></p>
+  <div class="card">
+    <h3>What to build</h3>
+    <ol>
+      <li>A command-line program: sentence in, JSON out, with <code>form</code>, <code>lemma</code>, <code>upos</code> and <code>feats</code> for each syntactic word.</li>
+      <li>Prompts kept in their own files, not buried in code, with <code>PROMPT_LOG.md</code> recording each version and its error count.</li>
+      <li>Routing by language, with selected guidelines for each.</li>
+      <li>Gates after every model call, a retry cap, and a loud failure when the cap is hit.</li>
+      <li>A <code>--stats</code> option printing calls, retries, input and output tokens for the run.</li>
+    </ol>
+    <h3>What to hand in</h3>
+    <ul class="check">
+      <li><input type="checkbox" id="p1" data-save="p2-a"><label for="p1">The repository, with a README showing one English and one Arabic run.</label></li>
+      <li><input type="checkbox" id="p2" data-save="p2-b"><label for="p2">Your gold standard: 30 sentences (15 per language) annotated by hand, as a JSON file.</label></li>
+      <li><input type="checkbox" id="p3" data-save="p2-c"><label for="p3">A results table: zero-shot against few-shot, single call against chain, with tag errors, feature errors, tokens and time for each.</label></li>
+      <li><input type="checkbox" id="p4" data-save="p2-d"><label for="p4">Half a page: which change helped most, which helped least, and one error you could not fix by prompting.</label></li>
+    </ul>
+    <p class="small" style="margin:0">Send me the repository link and the half page. The gold standard and the hand-counted errors are the raw material for Phase 3, where a program does the counting.</p>
+  </div>
+
+  <div class="note"><b>Bring to Lesson 9:</b> all through this phase you counted errors by reading outputs. What exactly would have to exist for a program to count them for you, every time you change a prompt?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w04-l7-context.html">← Lesson 7</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson08.js"></script>
+</body>
+</html>

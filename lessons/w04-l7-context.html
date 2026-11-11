@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7: Choosing what goes in the context window</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 2 · Week 4 · Lesson 7 · about 70 minutes</div>
+    <h1>Choosing what goes in the context window</h1>
+    <p class="lede">Prompt engineering asks "how do I word this?". Context engineering asks the bigger question: "of everything I could show the model, what should it see for this request?" More is not better, and this lesson shows why.</p>
+    <ul class="toc">
+      <li><a href="#budget">1 A budget</a></li>
+      <li><a href="#feats">2 Features</a></li>
+      <li><a href="#less">3 Less is more</a></li>
+      <li><a href="#moves">4 Four moves</a></li>
+      <li><a href="#order">5 Order</a></li>
+      <li><a href="#cache">6 Stable first</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>List everything that competes for space in a request, including the answer.</li>
+      <li>Read and write Universal Dependencies morphological features.</li>
+      <li>Explain two ways that adding context can make results worse.</li>
+      <li>Apply select, compress, order and structure to a real prompt.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> Pasting the complete guidelines into every request makes at least two things worse. Cost and latency rise, since you pay for those pages every time. And accuracy can fall: the few rules that matter for this sentence are buried among hundreds that do not.</div>
+
+  <h2 id="budget">1. The context window is a budget</h2>
+  <p>The <b>context</b> is everything the model can see when it produces a token: system prompt, guidelines, examples, documents, conversation history, tool results, and its own answer so far. The <b>context window</b> is the hard limit on all of that together, counted in tokens. Note the last item: the answer shares the window with the input. Fill the window with input and there is no room to reply.</p>
+  <p>Windows have grown very large, which tempts people to stop thinking and paste everything. Three costs remain however large the window is: you pay per input token, large inputs are slower, and, as section 3 shows, attention is finite even when space is not.</p>
+
+  <div class="try" id="pack">
+    <span class="label">Try it · 1</span>
+    <h3>Pack a request</h3>
+    <p class="small">A deliberately small window of 8,000 tokens, so the trade-offs bite. Tick what to include for annotating one paragraph.</p>
+    <div id="pk-items"></div>
+    <div class="meter" style="max-width:none;height:14px;margin:12px 0 4px"><i id="pk-fill" style="width:0"></i></div>
+    <div class="out" id="pk-out" aria-live="polite"></div>
+  </div>
+
+  <h2 id="feats">2. This week's linguistics: morphological features</h2>
+  <p>A part-of-speech tag says what class a word is in. <b>Morphological features</b> say what form it is in. Universal Dependencies writes them as <code>Name=Value</code> pairs joined by a bar:</p>
+  <table>
+    <tr><th>Word</th><th>Main features</th><th>Meaning</th></tr>
+    <tr><td><i>books</i></td><td><code>Number=Plur</code></td><td>plural</td></tr>
+    <tr><td><i>wrote</i></td><td><code>Tense=Past|VerbForm=Fin</code></td><td>finite past form</td></tr>
+    <tr><td class="ar">كتبتْ</td><td><code>Aspect=Perf|Gender=Fem|Number=Sing|Person=3</code></td><td>"she wrote"</td></tr>
+    <tr><td class="ar">المكتبة</td><td><code>Definite=Def|Gender=Fem|Number=Sing</code></td><td>"the library"</td></tr>
+  </table>
+  <p>Languages differ in which features they mark. English nouns mark number and little else. Arabic nouns mark gender, number (with a <b>dual</b> as well as singular and plural), definiteness and case; its verbs agree with their subject in person, gender and number. The complete UD inventory covers features from every language in the project, most of which are irrelevant to any one language.</p>
+  <div class="try">
+    <span class="label">Try it · 2</span>
+    <h3>Read the features</h3>
+    <div id="ft-box"></div>
+  </div>
+  <p>Here is why this belongs in a lesson about context. Your annotator must now output features, so the model needs the inventory. The whole inventory is long. English input needs a handful of it; Arabic needs a different, larger handful. <b>Which guidelines you include, for which input, is a context-engineering decision</b>, and you will make it in the lab.</p>
+
+  <h2 id="less">3. Why more context can be worse</h2>
+  <p>Two effects are well documented.</p>
+  <p><b>Distraction.</b> Irrelevant material is not ignored. Rules about Finnish case endings, sitting in a prompt for English tagging, are still tokens the model attends to, and they can pull its answers off course. Every sentence in a prompt should be there because it changes the output for the better.</p>
+  <p><b>Position.</b> Models do not use all parts of a long context equally well. A 2023 study by Liu and colleagues, titled "Lost in the Middle", found that models were best at using information placed at the very beginning or very end of a long input, and noticeably worse at using information in the middle. Models have improved since, but the general lesson stands: where you put something affects whether it is used.</p>
+
+  <div class="try" id="pos">
+    <span class="label">Try it · 3</span>
+    <h3>Where does the key rule sit?</h3>
+    <svg id="ps-svg" viewBox="0 0 320 170" role="img" aria-label="Schematic curve of how well information is used by its position in a long context" style="width:100%;max-width:440px;display:block;margin:auto"></svg>
+    <div class="row"><label for="ps-x" class="small" style="min-width:150px">Position in context <b id="ps-v">50%</b></label><input id="ps-x" type="range" min="0" max="100" step="1" value="50"></div>
+    <div class="out" id="ps-out" aria-live="polite"></div>
+    <p class="small" style="margin:0">This curve is a <b>schematic</b> of the reported pattern, not measured data. The size of the effect depends on the model and the task, which is why the lab has you measure it on yours.</p>
+  </div>
+
+  <h2 id="moves">4. Four moves</h2>
+  <ul>
+    <li><b>Select.</b> Include only what this request needs. English sentence: English-relevant rules. This is the most powerful move, and Phase 4 automates it with retrieval.</li>
+    <li><b>Compress.</b> Replace long material with a shorter version that keeps what matters: a summary of earlier conversation, a table in place of paragraphs, twenty lines of rules distilled from twenty pages.</li>
+    <li><b>Order.</b> Put the most important instructions where they are used best. A common arrangement for long inputs is reference material first and the specific question last, directly before the model starts writing.</li>
+    <li><b>Structure.</b> Wrap each kind of content in named tags (<code>&lt;guidelines&gt;</code>, <code>&lt;examples&gt;</code>, <code>&lt;sentence&gt;</code>) so the model can tell them apart and you can refer to them by name.</li>
+  </ul>
+  <p>Compression has a price: whatever you cut is gone. A summary of a conversation loses details that may turn out to matter. So compress what is bulky and low-value, and keep verbatim what is short and decisive, such as the exact rule for the copula.</p>
+
+  <h2 id="order">5. A layout that works</h2>
+<pre><code>[system]  role and task                     short, stable
+          &lt;guidelines&gt; selected rules &lt;/guidelines&gt;
+          &lt;examples&gt; minimal pairs &lt;/examples&gt;
+[user]    &lt;sentence&gt; the input &lt;/sentence&gt;   changes every request
+          one-line reminder of the output wanted</code></pre>
+  <p>Stable material at the top, the changing input at the bottom, and a brief restatement of the task right at the end, where it is freshest when generation begins.</p>
+
+  <h2 id="cache">6. A bonus for keeping the top stable</h2>
+  <p>Many providers offer <b>prompt caching</b>: if the beginning of your request is identical to a recent one, that repeated prefix is processed more cheaply and faster. The details and discounts vary by provider and model. The design rule is the same everywhere and matches the layout above: put what never changes first, and what changes every time last. One changed character near the top invalidates everything after it.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: measure what context costs and buys</h2>
+  <p><b>Time:</b> 90 minutes. First extend the schema from Lesson 4 with a features field, and extend your 20-sentence gold standard with hand-written features for the nouns and verbs.</p>
+<pre><code>schema["properties"]["tokens"]["items"]["properties"]["feats"] = {
+    "type": "string",
+    "description": "UD features as Name=Value pairs joined by |, or _ if none",
+}
+schema["properties"]["tokens"]["items"]["required"].append("feats")
+
+GUIDE_NONE = ""
+GUIDE_SELECTED = """&lt;guidelines&gt;
+... about 15 lines you write: the features that matter for English and
+Arabic nouns and verbs, with their allowed values ...
+&lt;/guidelines&gt;"""
+GUIDE_DUMP = open("ud_features_full.txt").read()   # paste the whole UD features page into this file
+
+import time
+def run(guide):
+    errors = tokens = 0
+    start = time.time()
+    for sentence, gold in GOLD:                 # your 20 hand-annotated sentences
+        out, used = annotate_fs(sentence, SYSTEM + "\n" + guide, EXAMPLES)
+        tokens += used
+        errors += sum(o["feats"] != g["feats"] for o, g in zip(out, gold))
+    return errors, tokens // len(GOLD), time.time() - start
+
+for name, guide in [("none", GUIDE_NONE), ("selected", GUIDE_SELECTED), ("dump", GUIDE_DUMP)]:
+    print(name, run(guide))</code></pre>
+  <ol>
+    <li>Fill in a table: feature errors, average input tokens, total time, for the three variants.</li>
+    <li>Did the dump beat your fifteen selected lines? By how much, at what cost per request?</li>
+    <li><b>Position test.</b> Take one rule the model needs, for example "write the dual as Number=Dual". Remove it from the dump, then insert it at the very start, the middle, and the very end in turn. Does the error count on dual nouns change?</li>
+    <li><b>Selection by language.</b> Write two selected guides, one English and one Arabic, and choose between them in code with a one-line check for Arabic letters. Compare with the combined guide.</li>
+    <li>Log every variant in <code>PROMPT_LOG.md</code>.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l07-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l07-r1"><label for="r1"><b>Required.</b> The Universal Dependencies <a href="https://universaldependencies.org/u/feat/index.html">universal features</a> page. Read the entries for Gender, Number, Case, Definite, Person, Tense and Aspect. These are the source for your selected guidelines.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l07-r2"><label for="r2"><b>Required.</b> Liu et al. (2023), <a href="https://arxiv.org/abs/2307.03172">Lost in the Middle: How Language Models Use Long Contexts</a>. Read the introduction and study the main figure. Compare it with what your own position test showed.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l07-r3"><label for="r3"><b>Optional.</b> Anthropic's engineering article "Effective context engineering for AI agents", for how these ideas scale up to long-running agents.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 8:</b> your annotator now does four things in one call: segmentation, tags, features, lemmas. Suppose it gets each one right 90% of the time, independently. What fraction of words come out right on all four?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w03-l6-fewshot.html">← Lesson 6</a> · <a href="../index.html">Course map</a> · <a href="w04-l8-chains.html">Lesson 8 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson07.js"></script>
+</body>
+</html>
