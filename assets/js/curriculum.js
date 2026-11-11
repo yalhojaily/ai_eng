@@ -48,16 +48,16 @@ window.COURSE = {
       weeks: [
         { n: 5, title: "Measuring before improving", ling: "Gold-standard corpora and treebanks",
           lessons: [
-            { id: "l09", title: "Why evals come first; building a test set" },
-            { id: "l10", title: "Accuracy, precision, recall, F1, confusion matrices" }
+            { id: "l09", title: "Why evals come first; building a test set", href: "lessons/w05-l9-testsets.html", mins: 70 },
+            { id: "l10", title: "Accuracy, precision, recall, F1, confusion matrices", href: "lessons/w05-l10-metrics.html", mins: 75 }
           ],
-          reading: "SLP3, evaluation sections of the classification chapter" },
+          reading: "The UD CoNLL-U format page; SLP3, evaluation sections of the classification chapter" },
         { n: 6, title: "Evals that scale", ling: "Inter-annotator agreement",
           lessons: [
-            { id: "l11", title: "Model-graded evals and their traps" },
-            { id: "l12", title: "Regression-testing prompts like code" }
+            { id: "l11", title: "Model-graded evals and their traps", href: "lessons/w06-l11-judges.html", mins: 75 },
+            { id: "l12", title: "Regression-testing prompts like code", href: "lessons/w06-l12-regression.html", mins: 75 }
           ],
-          reading: "A paper on annotator agreement (Cohen's kappa) in corpus annotation", milestone: "Ship the eval harness" }
+          reading: "Artstein & Poesio (2008) on inter-coder agreement; Zheng et al. (2023) on model judges", milestone: "Ship the eval harness" }
       ]
     },
     {

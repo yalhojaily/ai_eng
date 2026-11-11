@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 9: Why evals come first; building a test set</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 3 · Week 5 · Lesson 9 · about 70 minutes</div>
+    <h1>Why evals come first; building a test set</h1>
+    <p class="lede">In Phase 2 you improved prompts by reading outputs and counting mistakes by hand. That works for twenty sentences and one afternoon. This phase replaces your eyes with a program, so that every change is measured, every time.</p>
+    <ul class="toc">
+      <li><a href="#what">1 What an eval is</a></li>
+      <li><a href="#gold">2 Gold standards</a></li>
+      <li><a href="#conllu">3 CoNLL-U</a></li>
+      <li><a href="#build">4 Your own set</a></li>
+      <li><a href="#noise">5 Noise</a></li>
+      <li><a href="#split">6 Dev and test</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Name the four parts of an evaluation and say which one people skip.</li>
+      <li>Read a treebank file in CoNLL-U format and explain how such corpora are made.</li>
+      <li>Build a test set that represents your real inputs.</li>
+      <li>Say how sure you can be of an accuracy measured on <i>n</i> examples.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> For a program to count errors for you, three things must exist: a fixed set of inputs, a known correct answer for each one, and a function that compares an output with its answer. Add a way to total the results and you have an evaluation, or <b>eval</b>.</div>
+
+  <h2 id="what">1. What an eval is</h2>
+  <div class="flow" aria-label="Dataset, runner, scorer, report">
+    <div class="box">dataset<small>inputs + answers</small></div><span class="arr">→</span>
+    <div class="box">runner<small>your system</small></div><span class="arr">→</span>
+    <div class="box">scorer<small>compare</small></div><span class="arr">→</span>
+    <div class="box">report<small>numbers + errors</small></div>
+  </div>
+  <p>The runner is your application, which you already have. The scorer and the report are a few dozen lines of code. The part that takes real work, and the part people skip, is the <b>dataset</b>. Without it every decision in an AI project (this prompt or that one, this model or a cheaper one, ship or wait) is made on impressions from the last few examples someone happened to look at.</p>
+  <p>This is why evaluation comes before more prompt work, more retrieval, more agents. It is the instrument that tells you whether any of those helped. Teams that build it early move faster, because they can change things without fear.</p>
+
+  <h2 id="gold">2. Linguists built the first eval datasets</h2>
+  <p>Computational linguistics has measured systems against human-annotated corpora for decades. A corpus annotated with grammatical structure is called a <b>treebank</b>, and the annotations are the <b>gold standard</b>: the answers systems are scored against. The Universal Dependencies project you met in Phase 1 publishes treebanks for well over a hundred languages, all in one format, free to download.</p>
+  <p>How one is made matters for how far you trust it:</p>
+  <ol>
+    <li><b>Guidelines</b> are written: what each tag means, how to treat hard cases.</li>
+    <li><b>Annotators</b> label the text, often two people independently.</li>
+    <li><b>Disagreements</b> are counted, then settled by discussion or a senior annotator (adjudication). Where annotators keep disagreeing, the guidelines are revised.</li>
+    <li>The corpus is <b>released with a version number</b>, and errors found later are fixed in the next release.</li>
+  </ol>
+  <p>Two lessons for you. First, gold is not truth. It is a convention applied by careful people, and it contains mistakes and judgement calls. Your system can be marked wrong for a defensible answer. Second, this is exactly the process you will follow for your own data, at a smaller scale.</p>
+
+  <h2 id="conllu">3. Reading a treebank: CoNLL-U</h2>
+  <p>UD treebanks are plain text files in <b>CoNLL-U</b> format. One line per word, ten tab-separated columns, a blank line between sentences, and comment lines starting with <code>#</code>. The columns you need now are the first four and the sixth:</p>
+  <table>
+    <tr><th>Col</th><th>Name</th><th>Holds</th></tr>
+    <tr><td>1</td><td>ID</td><td>word number; a range such as <code>1-3</code> marks one written token that contains several syntactic words</td></tr>
+    <tr><td>2</td><td>FORM</td><td>the word as written</td></tr>
+    <tr><td>3</td><td>LEMMA</td><td>dictionary form</td></tr>
+    <tr><td>4</td><td>UPOS</td><td>universal part-of-speech tag</td></tr>
+    <tr><td>6</td><td>FEATS</td><td>morphological features, or <code>_</code></td></tr>
+  </table>
+  <p>Columns 7 and 8 give the syntactic head and relation (the "dependencies" in the name). An underscore means "nothing here".</p>
+
+  <div class="try" id="conl">
+    <span class="label">Try it · 1</span>
+    <h3>Parse a sentence</h3>
+    <p class="small">A sentence written for this lesson in treebank format, slightly simplified: «وكتابها جديد», "and her book is new". The table below is parsed live from the text. Edit a tag, or delete the range line, and watch.</p>
+    <textarea id="cn-text" dir="ltr" spellcheck="false" style="font-family:var(--mono);font-size:.78rem;min-height:150px;white-space:pre;overflow-x:auto"></textarea>
+    <div style="overflow-x:auto"><table class="tight" id="cn-table"></table></div>
+    <div class="out" id="cn-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice the first row.</b> The range line <code>1-3</code> records that three syntactic words were written as one token. It is the segmentation step from Lesson 8, stored as data. A scorer must skip range lines, or it will count the same letters twice.</p>
+  </div>
+
+  <h2 id="build">4. Building your own test set</h2>
+  <p>A public treebank is a fine starting point, but it tests the treebank's kind of text, usually news and web writing. Your application has its own inputs. A good test set for <i>your</i> system draws on three sources:</p>
+  <ul>
+    <li><b>Real inputs.</b> A sample of what actually arrives, chosen at random, not picked because it looked interesting.</li>
+    <li><b>Known failures.</b> Every bug you have fixed becomes a permanent case, so it cannot return unnoticed.</li>
+    <li><b>Deliberate hard cases.</b> The minimal pairs from Lesson 6, long sentences, mixed-language text, the injection sentence from Lesson 5.</li>
+  </ul>
+  <p>Keep the mix <b>representative</b>. If 70% of your traffic is Arabic and your test set is 70% English, a high score tells you little. Record for each item where it came from and what kind it is, so that you can report scores by group: per language, per source, per difficulty. An overall average hides exactly the weak spots you most need to see.</p>
+  <p>Start small. Fifty carefully checked items beat five thousand unchecked ones, and you can begin measuring today. Grow the set as failures teach you what is missing.</p>
+
+  <h2 id="noise">5. How much can a small set tell you?</h2>
+  <p>A test set is a sample, and a score on a sample is an estimate. Score 85% on 40 words and the true accuracy on all such text could plausibly be anywhere from the low 70s to the low 90s. The range in which the true value probably lies is a <b>confidence interval</b>, and it narrows only slowly: to halve it you need four times the data.</p>
+
+  <div class="try" id="ci">
+    <span class="label">Try it · 2</span>
+    <h3>How sure is that number?</h3>
+    <div class="row"><label for="ci-p" class="small" style="min-width:170px">Measured accuracy <b id="ci-pv">85%</b></label><input id="ci-p" type="range" min="50" max="99" step="1" value="85"></div>
+    <div class="row"><label for="ci-n" class="small" style="min-width:170px">Items scored <b id="ci-nv">40</b></label><input id="ci-n" type="range" min="10" max="2000" step="10" value="40"></div>
+    <svg id="ci-svg" viewBox="0 0 320 70" role="img" aria-label="Confidence interval on a 50 to 100 percent scale" style="width:100%;max-width:460px;display:block;margin:6px auto"></svg>
+    <div class="out" id="ci-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Prompt A scores 82% and prompt B 86%, each on 50 items. Set the sliders for each in turn: do the intervals overlap? How many items would you need before a four-point gap means something? (This uses the Wilson interval at 95% confidence. Lesson 12 shows a sharper method for comparing two versions on the <i>same</i> items.)</p>
+  </div>
+
+  <h2 id="split">6. Two sets, not one</h2>
+  <p>Every time you look at failures and adjust the prompt, you fit the prompt a little more closely to those particular items. After twenty rounds, the score on that set is flattering: the prompt has been shaped around it. So keep two sets:</p>
+  <ul>
+    <li>A <b>development set</b> that you run constantly, read in detail, and tune against.</li>
+    <li>A <b>test set</b> that you run rarely, and never read item by item, to check that gains on the development set are real.</li>
+  </ul>
+  <p>If the development score climbs while the test score stays flat, you have been memorising your examples, not improving the system. The same discipline protects against a quieter leak: few-shot examples copied from the test set. Any item that appears in a prompt must be removed from every set you score on.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: assemble your datasets</h2>
+  <p><b>Time:</b> 60 minutes. <code>pip install conllu</code>. Download two test files from the Universal Dependencies repositories on GitHub: <code>en_ewt-ud-test.conllu</code> from <code>UD_English-EWT</code> and <code>ar_padt-ud-test.conllu</code> from <code>UD_Arabic-PADT</code>.</p>
+<pre><code>import conllu, json, os, random
+from collections import Counter
+
+def load(path, n, seed=0):
+    sentences = conllu.parse(open(path, encoding="utf-8").read())
+    random.Random(seed).shuffle(sentences)          # fixed seed: same sample every run
+    out = []
+    for s in sentences[:n]:
+        words = [t for t in s if isinstance(t["id"], int)]   # skip range lines like 1-3
+        out.append({
+            "text": s.metadata["text"],
+            "tokens": [{
+                "form": t["form"], "lemma": t["lemma"], "upos": t["upos"],
+                "feats": "|".join(f"{k}={v}" for k, v in (t["feats"] or {}).items()) or "_",
+            } for t in words],
+        })
+    return out
+
+def save(items, path):
+    with open(path, "w", encoding="utf-8") as f:
+        for it in items:
+            f.write(json.dumps(it, ensure_ascii=False) + "\n")
+
+os.makedirs("data", exist_ok=True)
+for lang, path in [("en", "en_ewt-ud-test.conllu"), ("ar", "ar_padt-ud-test.conllu")]:
+    items = load(path, 100)
+    save(items[:50], f"data/{lang}_dev.jsonl")
+    save(items[50:], f"data/{lang}_test.jsonl")
+    tags = Counter(t["upos"] for it in items for t in it["tokens"])
+    print(lang, sum(tags.values()), "words", tags.most_common(5))</code></pre>
+  <ol>
+    <li>Run it. What is the most common tag in each language, and what share of all words does it take? Keep that number: it is next lesson's baseline.</li>
+    <li>Open the Arabic file in an editor and find three range lines. What kinds of word get split?</li>
+    <li>Pick ten Arabic sentences from the treebank and compare its lemmas and tags with what you would have written. Note every place you disagree with the gold. Is the gold wrong, or is it a convention you did not know?</li>
+    <li>Convert your own 30-sentence gold standard from Phase 2 to the same JSONL format, with a <code>"source": "mine"</code> field, and add <code>"source": "ud"</code> to the others.</li>
+    <li>Check that none of your few-shot examples appears in any of these files.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l09-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l09-r1"><label for="r1"><b>Required.</b> The Universal Dependencies <a href="https://universaldependencies.org/format.html">CoNLL-U format</a> page: the ten fields, and the section on words, tokens and multiword tokens.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l09-r2"><label for="r2"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on text classification: the sections on training, development and test sets.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l09-r3"><label for="r3"><b>Optional.</b> The README files of the two treebanks you downloaded. They say where the text came from and how it was annotated, which tells you what your scores on it will and will not mean.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 10:</b> a "tagger" that labels every single word NOUN is obviously useless. Using the tag counts from your lab, what accuracy does it get? What does that say about accuracy as a measure?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w04-l8-chains.html">← Lesson 8</a> · <a href="../index.html">Course map</a> · <a href="w05-l10-metrics.html">Lesson 10 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson09.js"></script>
+</body>
+</html>

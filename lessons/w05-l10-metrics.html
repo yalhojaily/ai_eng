@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10: Accuracy, precision, recall, F1, confusion matrices</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 3 · Week 5 · Lesson 10 · about 75 minutes</div>
+    <h1>Accuracy, precision, recall, F1, confusion matrices</h1>
+    <p class="lede">You have a dataset. Now you need numbers that tell the truth about your system, including the parts of the truth a single percentage hides.</p>
+    <ul class="toc">
+      <li><a href="#acc">1 Accuracy</a></li>
+      <li><a href="#matrix">2 The matrix</a></li>
+      <li><a href="#pr">3 Precision, recall</a></li>
+      <li><a href="#avg">4 Averages</a></li>
+      <li><a href="#align">5 Alignment</a></li>
+      <li><a href="#errors">6 Error analysis</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain why accuracy alone can make a useless system look good.</li>
+      <li>Read a confusion matrix and find a system's characteristic mistake in it.</li>
+      <li>Compute precision, recall and F1 for one class, and macro-F1 across classes.</li>
+      <li>Turn a table of numbers into a list of fixable problems.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> Nouns are the most common class, typically somewhere between a sixth and a third of all words depending on the language and the text. So the tagger that answers NOUN every time is right that often while knowing nothing. Any accuracy figure is meaningless until you know what doing nothing would have scored. That do-nothing score is called a <b>baseline</b>.</div>
+
+  <h2 id="acc">1. Accuracy, and its blind spot</h2>
+  <p><b>Accuracy</b> is the share of items answered correctly. It is simple, and for balanced tasks it is fine. Its weakness is that every item counts equally, so frequent classes dominate. A system can be excellent on NOUN, VERB and PUNCT, hopeless on AUX and SCONJ, and still post a high accuracy, because the classes it fails on are rare. Those rare classes are often the ones your application cares about.</p>
+  <p>Two habits fix most of the damage. Always report accuracy <b>next to a baseline</b>. And always break the result down <b>by class</b>, which is what the rest of this lesson builds.</p>
+
+  <h2 id="matrix">2. The confusion matrix</h2>
+  <p>A <b>confusion matrix</b> is a table of counts. Rows are the gold answer, columns are what the system said. Every item lands in exactly one cell. The diagonal holds the correct answers; everything off the diagonal is an error, and its position says <i>which</i> error.</p>
+
+  <div class="try" id="cm">
+    <span class="label">Try it · 1</span>
+    <h3>Three taggers, one matrix</h3>
+    <p class="small">100 words, three classes. Rows are gold, columns are predictions. Load a tagger, or change any count.</p>
+    <div class="row" id="cm-presets"></div>
+    <div style="overflow-x:auto"><table class="tight" id="cm-table" style="text-align:center"></table></div>
+    <div class="out" id="cm-sum" aria-live="polite"></div>
+    <div style="overflow-x:auto"><table class="tight" id="cm-metrics"></table></div>
+    <p class="small" style="margin:0"><b>Compare the first two.</b> Their accuracies differ by a single point, yet the second tagger has almost entirely lost one class. Then load the third: 60% accuracy for knowing nothing. Watch macro-F1 in each case.</p>
+  </div>
+
+  <h2 id="pr">3. Precision and recall</h2>
+  <p>For any one class, there are two different ways to be good, and they answer different questions. Take AUX.</p>
+  <ul>
+    <li><b>Precision</b>: of the words the system <i>called</i> AUX, how many really are? It falls when the system cries AUX too often.</li>
+    <li><b>Recall</b>: of the words that really <i>are</i> AUX, how many did the system find? It falls when the system misses them.</li>
+  </ul>
+  <p>In matrix terms: precision divides the diagonal cell by its <b>column</b> total; recall divides it by its <b>row</b> total. The pieces have names. A <b>true positive</b> is a correct AUX. A <b>false positive</b> is something wrongly called AUX. A <b>false negative</b> is a real AUX that was called something else.</p>
+<pre><code>precision = TP / (TP + FP)        recall = TP / (TP + FN)
+
+F1 = 2 × precision × recall / (precision + recall)</code></pre>
+  <p>The two pull against each other. A system that says AUX only when certain has high precision and poor recall. One that says AUX at the slightest hint has the reverse. <b>F1</b> combines them into one number that is high only when both are: it is their harmonic mean, which sits close to the lower of the two.</p>
+  <p>Which matters more depends on the cost of each mistake. A filter that removes harmful content should favour recall: missing one is worse than a false alarm. A system that auto-corrects text should favour precision: a wrong correction is worse than none.</p>
+  <div class="try">
+    <span class="label">Try it · 2</span>
+    <h3>Work one by hand</h3>
+    <p class="small">A text contains 16 real AUX words. The system labelled 10 words AUX, and 8 of those are right.</p>
+    <div id="pr-box"></div>
+  </div>
+
+  <h2 id="avg">4. One number for many classes</h2>
+  <p>With seventeen tags you have seventeen F1 scores. There are two standard ways to average them:</p>
+  <ul>
+    <li><b>Macro-F1</b>: the plain mean of the per-class F1 scores. Every class counts the same, however rare. A system that ignores a rare class is punished hard.</li>
+    <li><b>Micro-averaging</b>: pool all the counts first, then compute. Every <i>item</i> counts the same. For a task with exactly one label per item, micro-F1 equals accuracy.</li>
+  </ul>
+  <p>Report accuracy and macro-F1 together. When they are close, the system is even across classes. When accuracy is much higher, some class is being neglected, and the per-class table shows which.</p>
+
+  <h2 id="align">5. A complication from linguistics: alignment</h2>
+  <p>Everything above assumed you can line up predictions with gold answers one to one. For English tagging you nearly always can. For Arabic you often cannot, because the system must first decide where the words <i>are</i>. If gold has <span class="ar">و | كتاب | ها</span> and the system produced <span class="ar">و | كتابها</span>, there are three gold words and two predictions, and no position-by-position comparison is possible.</p>
+  <p>Two ways to handle it:</p>
+  <ul>
+    <li><b>Simple and honest:</b> score tags only on sentences whose segmentation matches gold exactly, and report the <b>segmentation match rate</b> as its own number. You will do this in the lab.</li>
+    <li><b>Standard in research:</b> align words by their character positions in the original text, and count a predicted word as correct only if it covers the same characters as a gold word <i>and</i> has the same tag. Segmentation errors then lower precision and recall directly. The official UD evaluation script works this way.</li>
+  </ul>
+  <p>Either way the principle is the one from Lesson 8: measure each stage of a pipeline separately, or an early error hides inside a later number.</p>
+
+  <h2 id="errors">6. From numbers to fixes: error analysis</h2>
+  <p>Metrics tell you where the system fails. They do not tell you why. For that you read the errors, and this is where knowing linguistics pays. The routine:</p>
+  <ol>
+    <li>Sort the off-diagonal cells of the confusion matrix by size. Take the largest.</li>
+    <li>Pull twenty examples from that cell and read each in its sentence.</li>
+    <li>Give each a short label for its cause. Typical ones: <i>guideline convention unknown</i>, <i>genuinely ambiguous</i>, <i>gold looks wrong</i>, <i>segmentation upstream</i>, <i>rare word</i>.</li>
+    <li>Count the labels. The biggest group is your next prompt change, and the "gold looks wrong" group is the ceiling on what any change can achieve.</li>
+  </ol>
+  <p>This is Lesson 5's iteration loop with a measuring instrument attached. A category with fifteen errors and a clear cause is worth an afternoon. A category with two is not.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: score your annotator</h2>
+  <p><b>Time:</b> 90 minutes. Use the development files from Lesson 9 and the annotator from Phase 2.</p>
+<pre><code>import json
+from collections import Counter
+
+def read(path):
+    return [json.loads(line) for line in open(path, encoding="utf-8")]
+
+def score(pairs):
+    """pairs: list of (gold_tag, predicted_tag)"""
+    conf = Counter(pairs)
+    tags = sorted({t for pair in pairs for t in pair})
+    accuracy = sum(g == p for g, p in pairs) / len(pairs)
+    rows = []
+    for t in tags:
+        tp = conf[(t, t)]
+        fp = sum(conf[(g, t)] for g in tags if g != t)
+        fn = sum(conf[(t, p)] for p in tags if p != t)
+        prec = tp / (tp + fp) if tp + fp else 0.0
+        rec = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        rows.append((t, prec, rec, f1, tp + fn))
+    macro_f1 = sum(r[3] for r in rows) / len(rows)
+    return accuracy, macro_f1, rows, conf
+
+def evaluate(items, annotate_fn):
+    pairs, skipped, errors = [], 0, []
+    for it in items:
+        pred = annotate_fn(it["text"])
+        if [p["form"] for p in pred] != [g["form"] for g in it["tokens"]]:
+            skipped += 1                       # segmentation differs from gold
+            continue
+        for g, p in zip(it["tokens"], pred):
+            pairs.append((g["upos"], p["upos"]))
+            if g["upos"] != p["upos"]:
+                errors.append((g["form"], g["upos"], p["upos"], it["text"]))
+    return pairs, skipped, errors
+
+items = read("data/en_dev.jsonl")
+pairs, skipped, errors = evaluate(items, lambda s: annotate(s, SYSTEM))
+accuracy, macro_f1, rows, conf = score(pairs)
+print(f"accuracy {accuracy:.3f}  macro-F1 {macro_f1:.3f}  "
+      f"segmentation match {1 - skipped / len(items):.2f}")
+for t, prec, rec, f1, n in rows:
+    print(f"{t:6} P {prec:.2f}  R {rec:.2f}  F1 {f1:.2f}  n={n}")
+print([(k, v) for k, v in conf.most_common() if k[0] != k[1]][:5])</code></pre>
+  <ol>
+    <li>Write the baseline: a function that tags every word with the most common tag. Score it with the same code. This is the floor.</li>
+    <li>Run your annotator on the English and Arabic development sets. Record accuracy, macro-F1 and segmentation match rate for each.</li>
+    <li>Which language has the larger gap between accuracy and macro-F1? Which tags cause it?</li>
+    <li>Take the largest confusion in each language. Read twenty of its errors and label the causes as in section 6.</li>
+    <li>How many of those twenty do you believe are gold errors or legitimate disagreements? What does that imply about the best score achievable?</li>
+    <li>Check your <code>score</code> function against a library: <code>pip install scikit-learn</code>, then <code>sklearn.metrics.classification_report(gold, pred)</code>.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l10-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l10-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on text classification: the section on evaluation with precision, recall and F-measure, including the confusion matrix and macro- and micro-averaging.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l10-r2"><label for="r2"><b>Required.</b> Read forty of your own system's errors, twenty per language, and write the cause of each. This counts as reading: it is the most informative text about your system that exists.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l10-r3"><label for="r3"><b>Optional.</b> Zeman et al. (2018), <a href="https://aclanthology.org/K18-2001/">CoNLL 2018 Shared Task: Multilingual Parsing from Raw Text to Universal Dependencies</a>. Read the section on evaluation metrics to see how alignment is handled when segmentation differs.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 11:</b> suppose your annotator also wrote a one-sentence note explaining each ambiguous word to a learner. There is no single correct sentence to compare against. How would you score a thousand of those notes?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w05-l9-testsets.html">← Lesson 9</a> · <a href="../index.html">Course map</a> · <a href="w06-l11-judges.html">Lesson 11 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson10.js"></script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11: Model-graded evals and their traps</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 3 · Week 6 · Lesson 11 · about 75 minutes</div>
+    <h1>Model-graded evals and their traps</h1>
+    <p class="lede">Tags can be checked by comparing strings. Explanations, summaries and translations cannot. For those, the common answer is to have a second model do the grading. It works, on one condition: you treat the grader as one more annotator whose reliability has to be measured.</p>
+    <ul class="toc">
+      <li><a href="#ladder">1 Ways to grade</a></li>
+      <li><a href="#judge">2 The judge</a></li>
+      <li><a href="#rubric">3 Rubrics</a></li>
+      <li><a href="#kappa">4 Agreement</a></li>
+      <li><a href="#traps">5 Traps</a></li>
+      <li><a href="#process">6 The process</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Choose between code checks, reference comparison, human review and a model judge.</li>
+      <li>Write a rubric specific enough that two graders reach the same verdict.</li>
+      <li>Compute Cohen's kappa and explain why raw agreement overstates reliability.</li>
+      <li>Name the common biases of model judges and test for them.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> You cannot compare a free-text note with a single right answer, because many different sentences would be good. You need a grader that applies criteria. People are the reference graders but do not scale to a thousand notes on every prompt change. A model can, if you first check it against people.</div>
+
+  <h2 id="ladder">1. Four ways to grade, cheapest first</h2>
+  <table>
+    <tr><th>Method</th><th>Good for</th><th>Weakness</th></tr>
+    <tr><td><b>Code checks</b></td><td>format, length, required words, exact answers, invariants</td><td>cannot judge meaning</td></tr>
+    <tr><td><b>Reference comparison</b></td><td>output should resemble a known good answer: word overlap or embedding similarity</td><td>many good answers look unlike the reference; similarity is not correctness (recall "safe" and "not safe" in Lesson 2)</td></tr>
+    <tr><td><b>Model judge</b></td><td>open-ended quality against written criteria, at scale</td><td>has biases; must be validated</td></tr>
+    <tr><td><b>Human review</b></td><td>the standard everything else is checked against</td><td>slow, costly, and people disagree too</td></tr>
+  </table>
+  <p>Use the cheapest method that can actually measure the property. A note's length is a code check. Whether it identifies the right sense of the word needs a judge. Mixing several is normal: code checks first, a judge only for what is left.</p>
+
+  <h2 id="judge">2. A model as judge</h2>
+  <p>A <b>model judge</b> (often written "LLM-as-judge") is a prompt that receives the input, the output to be graded, and a rubric, and returns a verdict. It is the structured-output pattern from Lesson 4 pointed at another model's work. Design choices that make judges more reliable:</p>
+  <ul>
+    <li><b>Reasoning before verdict.</b> Put a <code>reasoning</code> field ahead of the <code>verdict</code> field, so the judgement is formed before it is committed (Lesson 6).</li>
+    <li><b>Pass or fail, not one to ten.</b> Coarse scales are far more consistent. Nobody, human or model, can say reliably what separates a 6 from a 7.</li>
+    <li><b>One criterion per call.</b> "Is the sense right?" and "Is it one sentence?" are separate questions. Bundled together, one leaks into the other.</li>
+    <li><b>Show graded examples.</b> A few passes and fails with reasons, including borderline ones.</li>
+    <li><b>Prefer a different model from the one being graded</b>, where you can.</li>
+  </ul>
+
+  <h2 id="rubric">3. Rubrics are annotation guidelines</h2>
+  <p>A rubric is what Lesson 9 called guidelines, written for a grader. The test is the same as for any prompt: could two careful people apply it independently and reach the same verdict? "Is the note good?" fails that test. This passes:</p>
+<pre><code>PASS only if all three hold:
+ (a) the note states the sense the word has in THIS sentence;
+ (b) the note is exactly one sentence;
+ (c) the note contains no false statement about the language.
+Otherwise FAIL. Do not reward extra detail. Do not require
+anything the three criteria do not mention.</code></pre>
+  <p>Now be an annotator yourself. Grade eight notes with that rubric. Afterwards you will see how a model judge graded the same eight.</p>
+
+  <div class="try" id="grade">
+    <span class="label">Try it · 1</span>
+    <h3>Grade, then meet the judge</h3>
+    <p class="small">Each note was written for a learner about the word in capitals. Apply the three criteria exactly as written. The judge's verdicts are scripted to show typical behaviour.</p>
+    <div id="gr-items"></div>
+    <div class="row"><button class="primary" id="gr-reveal" type="button" disabled>Reveal the judge</button><button id="gr-reset" type="button">Start over</button></div>
+    <div class="out" id="gr-out" aria-live="polite">Grade all eight to continue.</div>
+  </div>
+
+  <h2 id="kappa">4. Measuring agreement: Cohen's kappa</h2>
+  <p>You and the judge agreed on some share of the items. Is that share good? Corpus linguists learned long ago that raw agreement flatters. If nine outputs in ten deserve a pass, two graders who each say "pass" nine times in ten <i>without looking</i> will still agree most of the time, by chance alone.</p>
+  <p><b>Cohen's kappa</b> corrects for this. It asks how much of the room above chance agreement the two graders actually filled:</p>
+<pre><code>kappa = (observed agreement − chance agreement) / (1 − chance agreement)</code></pre>
+  <p>Kappa is 1 for perfect agreement, 0 for agreement no better than chance, and negative when graders disagree more than chance would. By a widely used rule of thumb, above 0.8 is strong, 0.6 to 0.8 is substantial, 0.4 to 0.6 is moderate, and below 0.4 the grading is not yet dependable. Treat those bands as rough guidance, not law.</p>
+
+  <div class="try" id="kap">
+    <span class="label">Try it · 2</span>
+    <h3>Agreement beyond chance</h3>
+    <p class="small">You and a judge each graded the same outputs. Enter how many fell in each cell.</p>
+    <div class="row" id="kp-presets"></div>
+    <div style="overflow-x:auto"><table class="tight" id="kp-table" style="text-align:center"></table></div>
+    <div class="out" id="kp-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Load “High agreement, low kappa”.</b> The graders agree 90% of the time and kappa is close to zero. Almost everything passed, so agreeing was easy. The two cells that matter, where a real failure had to be caught, show the judge caught none of them.</p>
+  </div>
+
+  <h2 id="traps">5. The traps</h2>
+  <p>Model judges have characteristic biases, documented across many studies:</p>
+  <ul>
+    <li><b>Verbosity bias.</b> Longer, more detailed answers get better marks, whether or not the rubric asks for detail. You may have just seen this.</li>
+    <li><b>Position bias.</b> Asked to choose between answer A and answer B, judges favour one position. Run every comparison twice with the order swapped, and count only verdicts that survive the swap.</li>
+    <li><b>Self-preference.</b> Judges tend to rate text from their own model family more kindly.</li>
+    <li><b>Leniency.</b> Left to themselves, judges pass too much. A judge that passes everything has high agreement and no value.</li>
+    <li><b>Criteria drift.</b> Judges add requirements you never wrote, or forgive ones you did.</li>
+  </ul>
+  <p>None of these makes judges useless. Each one is a reason the judge must be measured against human labels before its numbers are believed, and measured again whenever its prompt or model changes.</p>
+
+  <h2 id="process">6. The process that works</h2>
+  <ol>
+    <li><b>Label by hand first.</b> Grade 50 to 100 real outputs yourself against a written rubric. Doing this is how you discover what the rubric should say.</li>
+    <li><b>Write the judge</b> from the rubric and a few of those labelled examples.</li>
+    <li><b>Measure the judge</b> on the remaining labelled items: agreement, kappa, and its own confusion matrix. Which way does it err: passing failures, or failing passes?</li>
+    <li><b>Fix the rubric</b>, not only the judge prompt. Disagreement usually means the criteria were ambiguous for you too.</li>
+    <li><b>Deploy, and keep checking.</b> Hand-grade a small random sample from every large run.</li>
+  </ol>
+  <p>A judge validated this way is an instrument. One that was never compared with a person is a second opinion from a stranger.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: build and validate a judge</h2>
+  <p><b>Time:</b> 90 minutes. Extend your annotator so that for one chosen word in a sentence it writes a one-sentence note for a learner. Generate notes for 40 word-in-sentence pairs (20 English, 20 Arabic), choosing ambiguous words such as <i>that</i>, <i>to</i>, <i>can</i>, <i>book</i>, <span class="ar">ذهب</span>.</p>
+<pre><code>JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reasoning": {"type": "string"},
+        "verdict": {"type": "string", "enum": ["PASS", "FAIL"]},
+    },
+    "required": ["reasoning", "verdict"],
+    "additionalProperties": False,
+}
+
+JUDGE_SYSTEM = """You grade notes written for language learners.
+... your rubric, and three graded examples with reasons ...
+"""
+
+def judge(sentence, word, note):
+    user = (f"&lt;sentence&gt;{sentence}&lt;/sentence&gt;\n&lt;word&gt;{word}&lt;/word&gt;\n"
+            f"&lt;note&gt;{note}&lt;/note&gt;")
+    return call_json(JUDGE_SYSTEM, user, JUDGE_SCHEMA, "grade")["verdict"]
+
+def kappa(a, b):
+    """a, b: equal-length lists of 'PASS' / 'FAIL'"""
+    n = len(a)
+    observed = sum(x == y for x, y in zip(a, b)) / n
+    pa, pb = a.count("PASS") / n, b.count("PASS") / n
+    chance = pa * pb + (1 - pa) * (1 - pb)
+    return (observed - chance) / (1 - chance) if chance &lt; 1 else 1.0</code></pre>
+  <ol>
+    <li>Grade all 40 notes yourself, PASS or FAIL, before writing the judge. Save your labels to a file.</li>
+    <li>Write <code>JUDGE_SYSTEM</code> using three of your labelled notes as examples. Remove those three from the set.</li>
+    <li>Run the judge on the other 37. Compute agreement and kappa against your labels.</li>
+    <li>Build the judge's 2×2 confusion matrix. Does it pass notes you failed, or fail notes you passed? Read every disagreement.</li>
+    <li>Revise the rubric once and measure again. Did kappa rise?</li>
+    <li><b>Bias test.</b> Take five passing notes and pad each with two extra, accurate sentences, so they now break the one-sentence rule. How many does the judge still pass?</li>
+    <li>If a second person can grade ten of the notes, compute kappa between the two of you. Compare it with your kappa against the judge.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l11-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l11-r1"><label for="r1"><b>Required.</b> Artstein &amp; Poesio (2008), <a href="https://aclanthology.org/J08-4004/">Inter-Coder Agreement for Computational Linguistics</a>. Read sections 1 and 2: why percentage agreement is not enough, and how chance-corrected coefficients work. This is the standard reference in the field.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l11-r2"><label for="r2"><b>Required.</b> Zheng et al. (2023), <a href="https://arxiv.org/abs/2306.05685">Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena</a>. Read the introduction and the section on the limitations of model judges: position, verbosity and self-enhancement bias.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l11-r3"><label for="r3"><b>Optional.</b> Reread your own rubric a day later and grade ten of the notes again without looking at your earlier labels. Compute kappa between you and yourself.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 12:</b> you change one line of a prompt. Accuracy moves from 88.0% to 88.4% on 500 words. Twelve words that were wrong are now right, and ten that were right are now wrong. Is the new prompt better?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w05-l10-metrics.html">← Lesson 10</a> · <a href="../index.html">Course map</a> · <a href="w06-l12-regression.html">Lesson 12 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson11.js"></script>
+</body>
+</html>

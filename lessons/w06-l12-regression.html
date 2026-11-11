@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12: Regression-testing prompts like code</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 3 · Week 6 · Lesson 12 · about 75 minutes</div>
+    <h1>Regression-testing prompts like code</h1>
+    <p class="lede">You already know how to keep software from breaking: tests that run on every change. A prompt is part of your program's behaviour, so it gets the same treatment. This lesson turns your eval into a habit that runs itself.</p>
+    <ul class="toc">
+      <li><a href="#code">1 Prompts are code</a></li>
+      <li><a href="#diff">2 Read the diff</a></li>
+      <li><a href="#real">3 Is it real?</a></li>
+      <li><a href="#harness">4 The harness</a></li>
+      <li><a href="#gates">5 Gates</a></li>
+      <li><a href="#living">6 Keeping it alive</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+      <li><a href="#project">Project</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Compare two versions item by item, not only by their averages.</li>
+      <li>Decide whether a small improvement is real or noise, with a test you can compute by hand.</li>
+      <li>Lay out an eval harness with caching, result files and a comparison tool.</li>
+      <li>Set pass/fail gates that block a bad prompt or model change automatically.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> No, not on that evidence. Twelve fixed against ten broken is what you would often see if the change did nothing and the flips were random. And the average hides something worse: ten things that used to work no longer do. Both points are the subject of this lesson.</div>
+
+  <h2 id="code">1. A prompt is code without a compiler</h2>
+  <p>Change a line of ordinary code and a type checker, a test suite and a reviewer stand between you and production. Change a line of a prompt and, by default, nothing does. The edit that fixes today's complaint can quietly undo last month's fix, and you find out from a user.</p>
+  <p>A change that breaks something that used to work is a <b>regression</b>. Regression testing means rerunning a fixed set of cases after every change and comparing with the last known-good result. For prompts that requires exactly what you have built in this phase, plus three engineering habits: prompts live in version control, every change runs the eval, and results are stored so that versions can be compared.</p>
+
+  <h2 id="diff">2. Read the diff, not the average</h2>
+  <p>An average compresses hundreds of outcomes into one number. Two versions with the same accuracy can be right about quite different items. The useful view is the list of items whose outcome <b>changed</b>: those <b>fixed</b> (wrong before, right now) and those <b>broken</b> (right before, wrong now).</p>
+
+  <div class="try" id="diffv">
+    <span class="label">Try it · 1</span>
+    <h3>Two candidates against a baseline</h3>
+    <p class="small">Twelve test items. The baseline gets nine right. Pick a candidate prompt and compare. Results are scripted.</p>
+    <div class="row">
+      <label><input type="radio" name="dv" value="A" checked> Candidate A: ten new rules</label>
+      <label><input type="radio" name="dv" value="B"> Candidate B: one minimal pair</label>
+    </div>
+    <div class="out" id="dv-sum" aria-live="polite"></div>
+    <div style="overflow-x:auto"><table class="tight" id="dv-table"></table></div>
+    <p class="small" style="margin:0"><b>Notice candidate A.</b> Its accuracy equals the baseline's, so a dashboard would report "no change". In fact it fixed three items and broke three others: new rules, applied too broadly. Only the diff shows it.</p>
+  </div>
+
+  <h2 id="real">3. Is the difference real?</h2>
+  <p>Lesson 9's confidence intervals compare two numbers as if they came from different samples. When both versions ran on the <i>same</i> items you can do much better, because most items come out the same either way and tell you nothing. Only the flips carry information.</p>
+  <p>The reasoning is short. If the change truly made no difference, each flip would be as likely to be a fix as a break, like a coin toss. So ask: with this many flips in total, how surprising is a split this uneven? That is the <b>sign test</b> (a close relative is called McNemar's test). The result is a <b>p-value</b>: the probability of a split at least this lopsided arising by chance. Small means the change probably did something.</p>
+
+  <div class="try" id="sign">
+    <span class="label">Try it · 2</span>
+    <h3>Count the flips</h3>
+    <div class="row">
+      <label class="field"><span>Fixed</span><input id="sg-f" type="number" min="0" max="500" value="12"></label>
+      <label class="field"><span>Broken</span><input id="sg-b" type="number" min="0" max="500" value="10"></label>
+    </div>
+    <div class="out" id="sg-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Start with last lesson's 12 and 10. Then try 12 and 2. Then 3 and 0: three fixes and no breaks feels decisive, but is it? The conventional line for "probably real" is p below 0.05, which is a convention, not a law of nature.</p>
+  </div>
+  <p>Statistics answers "is it real?". It does not answer "is it acceptable?". A change that is significantly better overall and breaks ten cases your users rely on may still be the wrong change. Read the broken list.</p>
+
+  <h2 id="harness">4. Anatomy of a harness</h2>
+<pre><code>project/
+  prompts/annotate_v7.txt        one file per version, in git
+  data/en_dev.jsonl  ar_dev.jsonl  en_test.jsonl  ar_test.jsonl
+  evals/run.py                   prompt + dataset  →  results/&lt;name&gt;.json
+  evals/compare.py               two result files  →  table, flips, p-value
+  evals/test_regression.py       the gate
+  results/                       one file per run, kept</code></pre>
+  <p>Four properties make a harness something you will actually run:</p>
+  <ul>
+    <li><b>Cached.</b> Store each model response under a key made from the model name, the prompt and the input. Rerunning after a change to the scorer then costs nothing, and only items affected by a prompt change are sent again.</li>
+    <li><b>Repeatable.</b> Temperature 0, fixed sampling seed for the data, model ID written into the result file. A score you cannot reproduce is an anecdote.</li>
+    <li><b>Per-item results.</b> Save the outcome of every item, not only the totals. Diffs and error analysis need them.</li>
+    <li><b>Cost and time recorded.</b> Tokens and seconds are results too. A prompt that gains a point and doubles the bill is a trade-off to see, not to discover later.</li>
+  </ul>
+
+  <h2 id="gates">5. Gates: let the machine say no</h2>
+  <p>Once results are files, a short test can compare a candidate with the stored baseline and fail when a limit is crossed. Wire that into your normal test command and a bad prompt change is blocked exactly as a failing unit test is. What goes in the gate is a policy decision about your product.</p>
+
+  <div class="try" id="pol">
+    <span class="label">Try it · 3</span>
+    <h3>Set the policy</h3>
+    <p class="small">Three changes are waiting to ship. Set your limits and see which get through. The baseline scores 88.0%.</p>
+    <div class="row"><label for="po-a" class="small" style="min-width:190px">Accuracy may drop by at most <b id="po-av">0.5</b> pts</label><input id="po-a" type="range" min="0" max="3" step="0.1" value="0.5"></div>
+    <div class="row"><label for="po-r" class="small" style="min-width:190px">Broken items allowed <b id="po-rv">5</b></label><input id="po-r" type="range" min="0" max="15" step="1" value="5"></div>
+    <div class="row"><label for="po-c" class="small" style="min-width:190px">Cost may rise by at most <b id="po-cv">10</b>%</label><input id="po-c" type="range" min="0" max="50" step="5" value="10"></div>
+    <div id="po-list"></div>
+    <p class="small" style="margin:0"><b>There is no setting that is simply correct.</b> Is a 40% saving worth 0.8 points? Is one more point worth a third more cost? The gate does not make that judgement for you. It makes sure the judgement is made once, on purpose, and then applied every time.</p>
+  </div>
+
+  <h2 id="living">6. Keeping the eval alive</h2>
+  <p><b>Every failure becomes a test.</b> When a user reports a wrong answer, add that input and its correct output to the dataset before fixing the prompt. The set grows toward the cases that matter, and the bug cannot return silently.</p>
+  <p><b>Model changes are prompt changes.</b> Providers retire models and release new ones. A prompt tuned on one model can behave differently on its successor. With a harness, evaluating a new model is one command and a diff. Without one, it is a leap.</p>
+  <p><b>Version the data too.</b> Treebanks are released in numbered versions, with corrections in each release, and a score on one version is not comparable with a score on another. Your own gold standard changes as you fix its mistakes. Record the dataset version in every result file.</p>
+  <p><b>Protect the test set.</b> All of this daily running happens on the development set. The held-out test set from Lesson 9 comes out before a release, not before lunch.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: build the harness</h2>
+  <p><b>Time:</b> 2 hours. Assemble the pieces from Lessons 9 to 11 into the layout in section 4.</p>
+<pre><code># evals/common.py
+import hashlib, json, os
+from math import comb
+
+CACHE_PATH = "results/cache.json"
+cache = json.load(open(CACHE_PATH, encoding="utf-8")) if os.path.exists(CACHE_PATH) else {}
+
+def cached(model, system, text, fn):
+    key = hashlib.sha256(json.dumps([model, system, text]).encode()).hexdigest()
+    if key not in cache:
+        cache[key] = fn(text, system)
+        json.dump(cache, open(CACHE_PATH, "w", encoding="utf-8"), ensure_ascii=False)
+    return cache[key]
+
+def flips(base, cand):
+    """base, cand: dicts of item id → True/False (correct or not)"""
+    fixed = [k for k in base if not base[k] and cand.get(k)]
+    broken = [k for k in base if base[k] and not cand.get(k)]
+    return fixed, broken
+
+def sign_test(fixed, broken):
+    n, k = fixed + broken, min(fixed, broken)
+    if n == 0:
+        return 1.0
+    return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)</code></pre>
+<pre><code># evals/test_regression.py     run with: pytest evals/
+import json
+from common import flips
+
+def test_candidate_is_safe():
+    base = json.load(open("results/baseline.json"))
+    cand = json.load(open("results/candidate.json"))
+    fixed, broken = flips(base["items"], cand["items"])
+    assert cand["schema_failures"] == 0
+    assert cand["accuracy"] >= base["accuracy"] - 0.005
+    assert len(broken) &lt;= 5, f"broke: {broken[:10]}"
+    assert cand["input_tokens"] &lt;= base["input_tokens"] * 1.10</code></pre>
+  <ol>
+    <li>Write <code>run.py</code>: it takes a prompt file and a dataset, runs the annotator through the cache, scores with Lesson 10's code, and writes a result file containing accuracy, macro-F1, segmentation match rate, schema failures, token totals, the model ID, the dataset name, and an <code>items</code> map with one true/false per word (use an ID such as <code>"sentence 12, word 3"</code>).</li>
+    <li>Write <code>compare.py</code>: it prints both sets of totals, the counts and lists of fixed and broken items, and the sign-test p-value.</li>
+    <li>Run your current best prompt and save it as <code>baseline.json</code>.</li>
+    <li>Make three prompt changes, one at a time, each saved as a new prompt file. For each: run, compare, read the broken list. Which, if any, would you ship?</li>
+    <li>Run the suite twice in a row. The second run should make no model calls. Then change only the scorer and confirm the cache still serves everything.</li>
+    <li>Switch <code>MODEL</code> to a cheaper model and run the same prompt. Use Try it 3's reasoning on the result: accuracy, broken items, cost.</li>
+    <li>Add one deliberately bad change, for example deleting the copula rule, and confirm that <code>pytest</code> fails.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l12-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l12-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on text classification: the section on statistical significance testing and the paired bootstrap, a more general alternative to the sign test.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l12-r2"><label for="r2"><b>Required.</b> Dror et al. (2018), <a href="https://aclanthology.org/P18-1128/">The Hitchhiker's Guide to Testing Statistical Significance in Natural Language Processing</a>. Read the introduction and the decision guide for choosing a test.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l12-r3"><label for="r3"><b>Optional.</b> Hamel Husain's essay "Your AI Product Needs Evals", a practitioner's account of building this discipline into a real product.</label></li>
+  </ul>
+
+  <h2 id="project">Phase 3 project: ship the eval harness</h2>
+  <p>The annotator from Phase 2 gave answers. This project makes it <b>accountable</b>: any change to it produces a measured, reviewable result.</p>
+  <div class="card">
+    <h3>What to build</h3>
+    <ol>
+      <li>The harness from this lab, in the annotator's repository, with a README explaining how to run and compare.</li>
+      <li>Four datasets from Universal Dependencies (English and Arabic, development and test), plus your own gold standard as a fifth, each with a recorded version.</li>
+      <li>A report generated by code for each run: accuracy against the baseline tagger, macro-F1, per-tag table, top confusions, segmentation match rate, tokens and time.</li>
+      <li>A validated model judge for the learner notes, with its kappa against your labels stated.</li>
+      <li>A regression gate that runs with <code>pytest</code>.</li>
+    </ol>
+    <h3>What to hand in</h3>
+    <ul class="check">
+      <li><input type="checkbox" id="p1" data-save="p3-a"><label for="p1">The repository link.</label></li>
+      <li><input type="checkbox" id="p2" data-save="p3-b"><label for="p2">One results table: baseline tagger, your Phase 2 annotator, and your best version now, on both languages' development sets.</label></li>
+      <li><input type="checkbox" id="p3" data-save="p3-c"><label for="p3">The final, single run on the held-out test sets, next to the development scores. Say how far apart they are and why you think that is.</label></li>
+      <li><input type="checkbox" id="p4" data-save="p3-d"><label for="p4">An error analysis: forty errors labelled by cause, with counts.</label></li>
+      <li><input type="checkbox" id="p5" data-save="p3-e"><label for="p5">One page: what the numbers changed about your opinion of the annotator, and one decision you would now make differently.</label></li>
+    </ul>
+    <p class="small" style="margin:0">Send me the link and the page. From here on, every project comes with its eval: retrieval in Phase 4 is measured from the first day.</p>
+  </div>
+
+  <div class="note"><b>Bring to Lesson 13:</b> in Phase 2 you chose guidelines by language, in code. Suppose instead you had five thousand pages of grammar reference. How would a program find the three paragraphs that matter for one particular sentence?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w06-l11-judges.html">← Lesson 11</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson12.js"></script>
+</body>
+</html>
