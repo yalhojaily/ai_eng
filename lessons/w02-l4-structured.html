@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4: Structured output and tool calling</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 1 · Week 2 · Lesson 4 · about 75 minutes</div>
+    <h1>Structured output and tool calling</h1>
+    <p class="lede">A model that writes prose is a chatbot. A model whose output your program can rely on, and which can ask your program to do things, is a component you can build with. This lesson is the step from one to the other.</p>
+    <ul class="toc">
+      <li><a href="#problem">1 The problem</a></li>
+      <li><a href="#schema">2 Schemas</a></li>
+      <li><a href="#enforce">3 Enforcement</a></li>
+      <li><a href="#validate">4 Validate</a></li>
+      <li><a href="#tools">5 Tools</a></li>
+      <li><a href="#engineer">6 Design rules</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+      <li><a href="#project">Project</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain why parsing free text from a model is fragile.</li>
+      <li>Write a JSON Schema for a linguistic annotation and get output that conforms to it.</li>
+      <li>Describe how constrained decoding works, using what you know about sampling.</li>
+      <li>Implement the tool-calling loop and say who does what at each step.</li>
+    </ul>
+  </div>
+
+  <h2 id="problem">1. Programs cannot read prose</h2>
+  <p>Last lesson's question: you ask for the part of speech of a word and need exactly one tag back. The obvious approach is to ask nicely and then pull the tag out of the reply with string handling. Try it against replies of the kind models actually give.</p>
+
+  <div class="try" id="parse">
+    <span class="label">Try it · 1</span>
+    <h3>Pick a parsing strategy</h3>
+    <label class="field"><span>How should the program extract the tag?</span>
+      <select id="pa-how">
+        <option value="exact">Exact match: reply == "VERB" or "NOUN"</option>
+        <option value="contains">Contains "verb" → VERB, else contains "noun" → NOUN</option>
+        <option value="first">First of the words noun / verb found in the reply</option>
+        <option value="json">Parse as JSON and read the "upos" field</option>
+      </select></label>
+    <table class="tight" id="pa-table"></table>
+    <div class="out" id="pa-score" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice:</b> every text strategy fails somewhere, and each fix breaks a different case. The JSON strategy is perfect on the replies that are JSON and useless on the rest. So the real task is not better parsing. It is making <i>every</i> reply look like the last row.</p>
+  </div>
+
+  <h2 id="schema">2. Say what shape you want: schemas</h2>
+  <p>Linguists solved a version of this problem long ago. When many people annotate a corpus, free-form labels are useless: one writes <i>verb</i>, another <i>V</i>, a third <i>action word</i>. So annotation projects define a <b>tagset</b>, a closed list of permitted labels, and guidelines for applying them. The Universal Dependencies project, which you will use for evaluation in Phase 3, defines exactly 17 universal part-of-speech tags (<code>NOUN</code>, <code>VERB</code>, <code>ADJ</code>, <code>ADP</code>, …) used across more than a hundred languages.</p>
+  <p>A tagset is a schema. In software the standard way to write one down is <b>JSON Schema</b>: a JSON document that describes what another JSON document must look like. The pieces you need most:</p>
+  <ul>
+    <li><code>type</code>: object, array, string, number, boolean.</li>
+    <li><code>properties</code> and <code>required</code>: which fields exist, and which must be present.</li>
+    <li><code>enum</code>: a closed list of allowed values. This is your tagset.</li>
+    <li><code>additionalProperties: false</code>: no fields beyond those listed.</li>
+  </ul>
+
+  <div class="try" id="valid">
+    <span class="label">Try it · 2</span>
+    <h3>Be the validator</h3>
+    <div class="small">The schema for one annotated word:</div>
+    <pre class="live" id="va-schema"></pre>
+    <label for="va-json" class="small">A candidate annotation. Edit it, or load a case:</label>
+    <div class="row" id="va-presets"></div>
+    <textarea id="va-json" spellcheck="false" style="font-family:var(--mono);font-size:.85rem;min-height:130px" dir="ltr"></textarea>
+    <div class="out" id="va-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice the last preset.</b> It passes. The schema is satisfied and the annotation is wrong: <i>book</i> in "Book a flight" is a verb. Hold on to that for section 4.</p>
+  </div>
+
+  <h2 id="enforce">3. Three levels of enforcement</h2>
+  <table>
+    <tr><th>Level</th><th>What you do</th><th>What you get</th></tr>
+    <tr><td>1. Ask</td><td>Describe the format in the prompt</td><td>Usually right. Sometimes wrapped in prose or code fences.</td></tr>
+    <tr><td>2. JSON mode</td><td><code>response_format: {"type": "json_object"}</code></td><td>Valid JSON, but in whatever shape the model chose.</td></tr>
+    <tr><td>3. Structured outputs</td><td><code>response_format</code> of type <code>json_schema</code>, with your schema</td><td>JSON that matches your schema, on models and providers that support it.</td></tr>
+  </table>
+  <p>Level 3 is not a stronger request. It works by a different mechanism, and you already know the parts. At every step the model produces a probability for every token. With <b>constrained decoding</b>, the server checks which tokens could legally come next under your schema, sets the probability of all the others to zero, and samples from what remains. The model cannot emit <code>"verb"</code> in lowercase if the enum says <code>"VERB"</code>, because that token is never on offer.</p>
+
+  <div class="try" id="cd">
+    <span class="label">Try it · 3</span>
+    <h3>Step through constrained decoding</h3>
+    <p class="small">Schema: an object with one required field <code>upos</code>, an enum of tags, no other fields. Probabilities are invented for illustration.</p>
+    <div class="out"><span class="small">Output so far: </span><code id="cd-so" style="font-size:1rem"></code></div>
+    <div class="small">What the model wants to say next, and what the schema allows:</div>
+    <div class="bars" id="cd-bars"></div>
+    <div class="stepnote" id="cd-note" aria-live="polite"></div>
+    <div class="row">
+      <button class="primary" id="cd-next" type="button">Emit next token</button>
+      <button id="cd-reset" type="button">Restart</button>
+    </div>
+    <p class="small" style="margin:0"><b>Notice step 1.</b> Left alone, this model would most likely have started with "The" or "Sure", the opening of a sentence. Constraint did not persuade it otherwise. It removed the option.</p>
+  </div>
+  <p>Two cautions. Support differs by model and by provider, and some treat the schema as a strong hint, not a guarantee, so check your model's page. And a constrained model is still the same model: if it "wanted" to write an explanation and you forced a bare tag, you get its best tag, not a better-reasoned one.</p>
+
+  <h2 id="validate">4. Valid is not the same as correct</h2>
+  <p>A schema checks <b>form</b>. It cannot check <b>truth</b>. <code>{"upos": "NOUN"}</code> for <i>book</i> in "Book a flight" is flawless JSON and a wrong answer. Keep two separate questions in your head for the rest of this course:</p>
+  <ul>
+    <li><b>Is the output well-formed?</b> Schemas and validation answer this, cheaply, on every request.</li>
+    <li><b>Is the output right?</b> Only evaluation against known answers can tell you. That is all of Phase 3.</li>
+  </ul>
+  <p>Even with structured outputs, validate in your own code. The pattern is short: parse, validate, and if either fails, retry once with the error message included, then give up loudly. Never pass unvalidated model output to the next stage.</p>
+
+  <h2 id="tools">5. Tools: letting the model ask for things</h2>
+  <p>A model can only produce tokens. It cannot count the tokens in a string, search a corpus, read a file or know today's date. <b>Tool calling</b> is structured output put to work: you describe functions the model may request, and when it wants one, it emits a structured request instead of an answer.</p>
+  <p>The crucial point: <b>the model never runs anything</b>. It writes a request. Your code decides whether to honour it, runs the function, and sends the result back as another message. Then the model continues.</p>
+
+  <div class="try" id="tl">
+    <span class="label">Try it · 4</span>
+    <h3>Walk the tool loop</h3>
+    <p class="small">One tool is available: <code>count_tokens(text)</code>. Values are examples. Step through and watch who acts.</p>
+    <div class="msgs" id="tl-msgs"></div>
+    <div class="stepnote" id="tl-note" aria-live="polite"></div>
+    <div class="row">
+      <button class="primary" id="tl-next" type="button">Next step</button>
+      <button id="tl-reset" type="button">Restart</button>
+    </div>
+    <p class="small" style="margin:0"><b>Notice:</b> two requests went to the model for one question, and the second carried the entire history, tool results included. It is the stateless conversation from Lesson 3 with two new kinds of message. Put this in a <code>while</code> loop and you have the skeleton of every agent in Phase 5.</p>
+  </div>
+
+  <p>A tool definition has a name, a description, and a JSON Schema for its arguments:</p>
+<pre><code>{
+  "type": "function",
+  "function": {
+    "name": "count_tokens",
+    "description": "Count how many tokens a text uses. Use this whenever the user asks about token counts; never estimate.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The exact text to count." }
+      },
+      "required": ["text"]
+    }
+  }
+}</code></pre>
+
+  <h2 id="engineer">6. Design rules</h2>
+  <ul>
+    <li><b>Descriptions are prompts.</b> The model chooses tools by reading their names and descriptions. Say when to use the tool, not only what it does.</li>
+    <li><b>Prefer enums to free strings</b> wherever the set of answers is closed. A tagset beats a text field.</li>
+    <li><b>Arguments are untrusted input.</b> The model wrote them, possibly influenced by text it read. Validate them as you would validate a web form before touching a file or a database.</li>
+    <li><b>Structured output or tool?</b> Use structured output when you want <i>data back</i>. Use a tool when the model needs <i>something done</i> or something looked up before it can answer.</li>
+    <li><b>Order fields so thinking comes first.</b> Output is generated left to right. A <code>reason</code> field placed before <code>upos</code> lets the model reason before committing; placed after, it is a justification written after the fact.</li>
+  </ul>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: an annotator and a tool</h2>
+  <p><b>Time:</b> 75 minutes. <b>Setup:</b> same client as Lesson 3, plus <code>pip install jsonschema tiktoken</code>. Pick a model that supports both features: filter the OpenRouter model list by <a href="https://openrouter.ai/models?supported_parameters=structured_outputs">structured outputs</a> and by <a href="https://openrouter.ai/models?supported_parameters=tools">tools</a>.</p>
+  <p><b>Part A. Schema-constrained annotation.</b></p>
+<pre><code>import json, jsonschema
+
+UPOS = ["ADJ","ADP","ADV","AUX","CCONJ","DET","INTJ","NOUN","NUM",
+        "PART","PRON","PROPN","PUNCT","SCONJ","SYM","VERB","X"]
+
+schema = {
+    "type": "object",
+    "properties": {
+        "tokens": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "form":  {"type": "string", "description": "The word as written"},
+                    "lemma": {"type": "string", "description": "Dictionary form"},
+                    "upos":  {"type": "string", "enum": UPOS},
+                },
+                "required": ["form", "lemma", "upos"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["tokens"],
+    "additionalProperties": False,
+}
+
+def annotate(sentence):
+    r = client.chat.completions.create(
+        model=MODEL,
+        temperature=0,
+        messages=[
+            {"role": "system", "content": "Annotate each word of the sentence with its "
+             "lemma and Universal Dependencies part-of-speech tag."},
+            {"role": "user", "content": sentence},
+        ],
+        response_format={"type": "json_schema",
+                         "json_schema": {"name": "annotation", "strict": True, "schema": schema}},
+    )
+    data = json.loads(r.choices[0].message.content)
+    jsonschema.validate(data, schema)      # never skip this
+    return data["tokens"]
+
+for t in annotate("Book a flight and read the book."):
+    print(t)</code></pre>
+  <ol>
+    <li>Does it tag the two occurrences of <i>book</i> differently? That is contextual meaning from Lesson 2, visible in output.</li>
+    <li>Annotate <span class="ar">ذهب الولد إلى المدرسة</span> and <span class="ar">اشترت خاتماً من ذهب</span>. Are the two <span class="ar">ذهب</span> tagged correctly?</li>
+    <li>Annotate <span class="ar">وسيكتبونها</span> on its own. The model must give one tag to a word that contains a conjunction, a future marker, a verb and a pronoun. What does it choose, and what does that tell you about word-level schemas for Arabic? (Phase 2 returns to this.)</li>
+    <li>Remove the <code>response_format</code> argument and run five sentences. Record every way the output breaks your parser.</li>
+  </ol>
+  <p><b>Part B. The tool loop.</b></p>
+<pre><code>import tiktoken
+enc = tiktoken.get_encoding("cl100k_base")
+
+def count_tokens(text):
+    return {"tokens": len(enc.encode(text)), "words": len(text.split())}
+
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "count_tokens",
+        "description": "Count tokens and words in a text. Use whenever token counts "
+                       "are needed; never estimate them.",
+        "parameters": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Exact text to count"}},
+            "required": ["text"],
+        },
+    },
+}]
+
+messages = [{"role": "user", "content":
+    "Which costs more tokens per word: 'The students will write their lessons "
+    "in the library.' or its Arabic translation? Translate it, then measure both."}]
+
+while True:
+    r = client.chat.completions.create(model=MODEL, messages=messages, tools=tools)
+    msg = r.choices[0].message
+    messages.append(msg)
+    if not msg.tool_calls:
+        break
+    for call in msg.tool_calls:
+        args = json.loads(call.function.arguments)
+        print("model asked for:", call.function.name, args)
+        result = count_tokens(**args)
+        messages.append({"role": "tool", "tool_call_id": call.id,
+                         "content": json.dumps(result)})
+
+print(msg.content)</code></pre>
+  <ol start="5">
+    <li>How many requests did the loop make? Did the model call the tool twice in one turn or across two turns?</li>
+    <li>Delete the sentence "never estimate them" from the description, and change the question to ask for a "rough" comparison. Does the model still call the tool? This is what "descriptions are prompts" means in practice.</li>
+    <li>The numbers come from <code>cl100k_base</code>, which may not be your model's own tokenizer. How could you check, using what you measured in Lesson 3's lab?</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l04-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l04-r1"><label for="r1"><b>Required.</b> The Universal Dependencies <a href="https://universaldependencies.org/u/pos/">universal POS tags</a> page. Read the definitions of all 17 tags, and note two that you would have confused. This is your tagset for Phases 2 and 3.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l04-r2"><label for="r2"><b>Required.</b> OpenRouter's guides on <a href="https://openrouter.ai/docs/guides/features/structured-outputs">structured outputs</a> and <a href="https://openrouter.ai/docs/guides/features/tool-calling">tool calling</a>. Check which of the models you have used support each.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l04-r3"><label for="r3"><b>Optional.</b> <a href="https://json-schema.org/understanding-json-schema">Understanding JSON Schema</a>: the chapters on objects, arrays and enumerated values.</label></li>
+  </ul>
+
+  <h2 id="project">Phase 1 project: ship the tokenizer explorer</h2>
+  <p>You now have every piece. The project turns the four labs into one small tool that answers a real question: <b>how well do a model's tokens line up with the morphemes of Arabic and English, and what does the mismatch cost?</b></p>
+  <div class="card">
+    <h3>What to build</h3>
+    <p>A command-line program (a web page is welcome but not required) that takes a word or sentence and reports:</p>
+    <ol>
+      <li>Its tokens under at least one real tokenizer, shown piece by piece.</li>
+      <li>Tokens per word, and bytes per token.</li>
+      <li>A morpheme segmentation produced by a model through structured output, with a schema you design.</li>
+      <li>A boundary-agreement score: of the morpheme boundaries, what fraction are also token boundaries?</li>
+    </ol>
+    <h3>What to hand in</h3>
+    <ul class="check">
+      <li><input type="checkbox" id="p1" data-save="p1-a"><label for="p1">The program, in a repository, with a README showing one English and one Arabic example.</label></li>
+      <li><input type="checkbox" id="p2" data-save="p1-b"><label for="p2">A table for 20 English and 20 Arabic words you chose: tokens, morphemes, agreement score.</label></li>
+      <li><input type="checkbox" id="p3" data-save="p1-c"><label for="p3">Your own hand segmentation for 10 of the Arabic words, and a count of how often the model's segmentation matched yours. This is your first evaluation.</label></li>
+      <li><input type="checkbox" id="p4" data-save="p1-d"><label for="p4">Half a page: what did you find, and what surprised you?</label></li>
+    </ul>
+    <p class="small" style="margin:0">Send me the repository link and the half page when it is done, and I will review it before Phase 2.</p>
+  </div>
+
+  <div class="note"><b>Bring to Lesson 5:</b> in Part A you gave the model one line of instruction. Rewrite that system message so that a careful human annotator who had never heard of Universal Dependencies could do the task from your text alone. How long did it get?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w02-l3-api.html">← Lesson 3</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson04.js"></script>
+</body>
+</html>

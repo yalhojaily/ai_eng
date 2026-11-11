@@ -16,10 +16,10 @@ window.COURSE = {
           reading: "SLP3, the chapters on words and tokens (BPE section) and on vector semantics and embeddings" },
         { n: 2, title: "Talking to models from code", ling: "Language as a probability distribution",
           lessons: [
-            { id: "l03", title: "Your first API call: messages, sampling, streaming" },
-            { id: "l04", title: "Structured output and tool calling" }
+            { id: "l03", title: "Your first API call: messages, sampling, streaming", href: "lessons/w02-l3-api.html", mins: 75 },
+            { id: "l04", title: "Structured output and tool calling", href: "lessons/w02-l4-structured.html", mins: 75 }
           ],
-          reading: "SLP3, the chapter on n-gram language models", milestone: "Ship the tokenizer explorer" }
+          reading: "SLP3, the chapter on n-gram language models; the Universal Dependencies POS tag definitions", milestone: "Ship the tokenizer explorer" }
       ]
     },
     {

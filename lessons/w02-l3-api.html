@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3: Your first API call</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 1 · Week 2 · Lesson 3 · about 75 minutes</div>
+    <h1>Your first API call: messages, sampling, streaming</h1>
+    <p class="lede">In Week 1 you pressed the "sample" button yourself. Now a server presses it for you, thousands of times a second, and you steer it with a handful of settings. This lesson is every one of those settings, and what comes back.</p>
+    <ul class="toc">
+      <li><a href="#request">1 The request</a></li>
+      <li><a href="#stateless">2 No memory</a></li>
+      <li><a href="#sampling">3 Sampling</a></li>
+      <li><a href="#stream">4 Streaming</a></li>
+      <li><a href="#response">5 The response</a></li>
+      <li><a href="#engineer">6 Habits</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Write a chat request by hand and name every field in it.</li>
+      <li>Explain why a "conversation" costs more with every turn.</li>
+      <li>Predict what temperature and top‑p do to a distribution before you run anything.</li>
+      <li>Stream a response and read its usage and finish reason.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> The provider's server runs the whole loop: tokenize, predict, sample, append, repeat. You never see the probabilities. You send text and a few numbers that shape the sampling, and you get tokens back.</div>
+
+  <h2 id="request">1. The request is a small JSON document</h2>
+  <p>Nearly every model provider accepts the same basic shape, usually called the <b>chat completions</b> format. It has three parts:</p>
+  <ul>
+    <li><b><code>model</code></b>: which model to run.</li>
+    <li><b><code>messages</code></b>: the text, as a list of turns. Each turn has a <code>role</code> and <code>content</code>.</li>
+    <li><b>Parameters</b>: numbers that control generation, such as <code>temperature</code> and <code>max_tokens</code>.</li>
+  </ul>
+  <p>There are three roles. <code>system</code> sets standing instructions and is written by you, the developer. <code>user</code> is the person's input. <code>assistant</code> is what the model said earlier. Before the model sees any of it, the server flattens the whole list into one long token sequence with special marker tokens between turns. Roles are a convention the model was trained on, not separate channels.</p>
+
+  <div class="try" id="builder">
+    <span class="label">Try it · 1</span>
+    <h3>Build a request</h3>
+    <label class="field"><span>System message</span><input id="rb-sys" type="text" dir="auto" value="You are a concise linguistics tutor."></label>
+    <label class="field"><span>User message</span><input id="rb-user" type="text" dir="auto" value="What is a morpheme? One sentence."></label>
+    <div class="row"><label for="rb-temp" class="small" style="min-width:140px">temperature <b id="rb-tv">0.7</b></label><input id="rb-temp" type="range" min="0" max="2" step="0.1" value="0.7"></div>
+    <div class="row"><label for="rb-max" class="small" style="min-width:140px">max_tokens <b id="rb-mv">200</b></label><input id="rb-max" type="range" min="20" max="1000" step="20" value="200"></div>
+    <div class="row"><label><input id="rb-stream" type="checkbox"> stream</label></div>
+    <div class="small">This is exactly what travels over the network:</div>
+    <pre class="live" id="rb-out"></pre>
+    <p class="small" style="margin:0"><b>Notice:</b> clear the system message and the whole entry disappears: it is optional. Everything else in this lesson is a variation on this document.</p>
+  </div>
+
+  <h2 id="stateless">2. The model remembers nothing</h2>
+  <p>This is the fact that surprises most developers. The model keeps <b>no state between requests</b>. A chat application feels like a conversation only because, on every turn, the application sends the <i>entire</i> history again, with the new message at the end.</p>
+
+  <div class="try" id="chat">
+    <span class="label">Try it · 2</span>
+    <h3>Watch the history grow</h3>
+    <p class="small">The replies here are scripted, not from a live model. Token counts are rough estimates. Press to send each turn and watch what is actually transmitted.</p>
+    <div class="msgs" id="ch-msgs"></div>
+    <div class="row">
+      <button class="primary" id="ch-next" type="button">Send next turn</button>
+      <button id="ch-reset" type="button">Restart</button>
+    </div>
+    <table class="tight" id="ch-table"><tr><th>Request</th><th>Messages sent</th><th>Input tokens</th><th>Total billed so far</th></tr></table>
+    <p class="small" style="margin:0"><b>Notice:</b> the model can answer the last question only because the answer was re-sent inside the request. And the "total billed" column grows faster than the conversation does: turn 1 is paid for again on turn 2, and again on turn 3. Long conversations cost far more than their length suggests. Managing that is the subject of Week 4.</p>
+  </div>
+
+  <h2 id="sampling">3. Sampling: language as a probability distribution</h2>
+  <p>Psycholinguists have a classic experiment, the <b>cloze task</b>: show people a sentence with a gap and record what they fill in. <i>"I would like a cup of ___."</i> Most say <i>tea</i> or <i>coffee</i>; a few say <i>water</i>; almost nobody says <i>joy</i>. The proportion giving each answer is that word's cloze probability. Humans carry a probability distribution over what comes next, and reading slows down measurably at unexpected words.</p>
+  <p>A language model's output is the same object. How unexpected a word is has a name, <b>surprisal</b>, and the average surprisal of a distribution is its <b>entropy</b>, measured in bits. Low entropy: the next word is nearly certain. High entropy: many continuations are plausible. Sampling parameters reshape this distribution before one token is drawn.</p>
+  <ul>
+    <li><b><code>temperature</code></b> sharpens (below 1) or flattens (above 1) the distribution. At 0 the top token always wins.</li>
+    <li><b><code>top_p</code></b> (nucleus sampling) keeps only the most likely tokens whose probabilities add up to <i>p</i>, and discards the long tail entirely.</li>
+    <li><b><code>max_tokens</code></b> is a hard cap on output length. It does not make the answer concise; it cuts it off.</li>
+    <li><b><code>stop</code></b> is a list of strings that end generation when produced.</li>
+  </ul>
+
+  <div class="try" id="samp">
+    <span class="label">Try it · 3</span>
+    <h3>Reshape a distribution</h3>
+    <p class="gen" style="margin:0 0 6px">I would like a cup of <b>___</b></p>
+    <p class="small">The starting probabilities are invented for illustration.</p>
+    <div class="bars" id="sp-bars"></div>
+    <div class="row"><label for="sp-temp" class="small" style="min-width:140px">temperature <b id="sp-tv">1.0</b></label><input id="sp-temp" type="range" min="0.1" max="2" step="0.1" value="1"></div>
+    <div class="row"><label for="sp-topp" class="small" style="min-width:140px">top_p <b id="sp-pv">1.00</b></label><input id="sp-topp" type="range" min="0.1" max="1" step="0.05" value="1"></div>
+    <div class="out" id="sp-ent" aria-live="polite"></div>
+    <div class="row"><button class="primary" id="sp-draw" type="button">Draw 30 samples</button></div>
+    <div class="out tally" id="sp-tally" aria-live="polite">Samples will be tallied here.</div>
+    <p class="small" style="margin:0"><b>Experiments.</b> (1) Set temperature to 0.1 and draw: how many distinct words? (2) Set it to 2.0 and draw: did <i>joy</i> or <i>tokens</i> appear? (3) Keep temperature at 2.0 but lower top_p to 0.8. The tail is cut, so you get variety without nonsense. That combination is why top_p exists.</p>
+  </div>
+
+  <p>Which settings to use depends on the job. For extraction, classification and anything you will evaluate, use a low temperature: you want the same answer each time. For brainstorming or varied phrasing, go higher. Change temperature or top_p, not both at once, until you have a reason.</p>
+
+  <h2 id="stream">4. Streaming</h2>
+  <p>Tokens are produced one at a time. By default the server waits until the last one and sends the whole answer. With <code>"stream": true</code> it sends each piece as it is generated. The total time is the same. What changes is the <b>time to first token</b>, which is what a person waiting actually feels.</p>
+
+  <div class="try" id="streamdemo">
+    <span class="label">Try it · 4</span>
+    <h3>Same answer, two deliveries</h3>
+    <div class="row">
+      <button class="primary" id="st-go" type="button">Start</button>
+      <button id="st-reset" type="button">Reset</button>
+    </div>
+    <div class="row"><label for="st-speed" class="small" style="min-width:140px">Speed <b id="st-sv">6</b> tokens/sec</label><input id="st-speed" type="range" min="1" max="20" step="1" value="6"></div>
+    <div class="panes">
+      <div class="pane"><b class="h">Without streaming</b><span id="st-a"></span></div>
+      <div class="pane"><b class="h">With streaming</b><span id="st-b"></span></div>
+    </div>
+    <div class="out small" id="st-info" aria-live="polite">Press Start. You can pause at any point and change the speed while it runs.</div>
+  </div>
+  <p>Stream when a person is watching. Do not bother when a program consumes the output, as in a batch job: you need the whole thing before you can use it anyway.</p>
+
+  <h2 id="response">5. What comes back</h2>
+  <p>The response is also JSON. Three fields matter every time:</p>
+<pre><code>{
+  "choices": [{
+    "message": { "role": "assistant", "content": "A morpheme is ..." },
+    "finish_reason": "stop"
+  }],
+  "usage": { "prompt_tokens": 27, "completion_tokens": 19, "total_tokens": 46 }
+}</code></pre>
+  <ul>
+    <li><b><code>content</code></b>: the generated text.</li>
+    <li><b><code>finish_reason</code></b>: why generation ended. <code>stop</code> means the model finished on its own. <code>length</code> means it hit <code>max_tokens</code> and the answer is cut off. Always check it.</li>
+    <li><b><code>usage</code></b>: the token counts you are billed for. Input and output are priced separately, and output usually costs several times more per token.</li>
+  </ul>
+
+  <div class="try" id="cost">
+    <span class="label">Try it · 5</span>
+    <h3>Cost arithmetic</h3>
+    <p class="small">Prices are quoted per million tokens. The defaults below are example numbers only; look up the real ones on your model's page.</p>
+    <div class="row"><label class="field"><span>Input tokens / request</span><input id="c-in" type="number" min="0" value="1500"></label><label class="field"><span>Output tokens / request</span><input id="c-out" type="number" min="0" value="400"></label></div>
+    <div class="row"><label class="field"><span>$ per 1M input</span><input id="c-pin" type="number" min="0" step="0.01" value="1"></label><label class="field"><span>$ per 1M output</span><input id="c-pout" type="number" min="0" step="0.01" value="5"></label></div>
+    <label class="field"><span>Requests per day</span><input id="c-n" type="number" min="0" value="2000"></label>
+    <div class="out" id="c-res" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Try:</b> double the output tokens, then separately double the input tokens. Which hurts more at these prices? Then recall Lesson 1: if your users write Arabic, what happens to the input figure?</p>
+  </div>
+
+  <h2 id="engineer">6. Habits to form now</h2>
+  <ul>
+    <li><b>Keys live in environment variables.</b> Never in source code, never in a repository. A leaked key is someone else spending your money.</li>
+    <li><b>Check <code>finish_reason</code>.</b> A truncated answer looks fine until it is parsed.</li>
+    <li><b>Log <code>usage</code> from day one.</b> You cannot control a cost you never measured.</li>
+    <li><b>Expect variation.</b> Even at temperature 0, outputs can differ slightly between runs. Do not write tests that demand identical strings.</li>
+    <li><b>Expect failure.</b> Requests time out and get rate-limited. Wrap calls with a retry that waits longer each time.</li>
+  </ul>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: talk to a real model</h2>
+  <p><b>Time:</b> 60 minutes. <b>Setup:</b> the lab uses OpenRouter, which exposes many providers' models behind one API in the standard chat format, called through the widely used <code>openai</code> client library. What you learn transfers to any provider.</p>
+<pre><code>pip install openai
+export OPENROUTER_API_KEY="sk-or-..."   # from openrouter.ai/settings/keys</code></pre>
+  <p>Choose any inexpensive chat model from <a href="https://openrouter.ai/models">openrouter.ai/models</a> and paste its ID into <code>MODEL</code>.</p>
+<pre><code>import os, time
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ["OPENROUTER_API_KEY"],
+)
+MODEL = "provider/model-name"   # replace with a real ID
+
+def ask(messages, **params):
+    return client.chat.completions.create(model=MODEL, messages=messages, **params)
+
+# --- Part A: first call ---
+r = ask([
+    {"role": "system", "content": "You are a concise linguistics tutor."},
+    {"role": "user", "content": "What is a morpheme? One sentence."},
+], temperature=0.7, max_tokens=200)
+print(r.choices[0].message.content)
+print(r.choices[0].finish_reason, r.usage)
+
+# --- Part B: sampling ---
+cloze = [{"role": "user", "content":
+          "Fill the gap with exactly one word, nothing else: I would like a cup of ___"}]
+for t in (0.0, 1.0, 1.8):
+    words = [ask(cloze, temperature=t, max_tokens=5).choices[0].message.content.strip()
+             for _ in range(8)]
+    print(t, words)
+
+# --- Part C: streaming ---
+start, first = time.time(), None
+stream = ask([{"role": "user", "content": "Explain the distributional hypothesis in 80 words."}],
+             stream=True)
+for chunk in stream:
+    if not chunk.choices:
+        continue
+    piece = chunk.choices[0].delta.content
+    if piece:
+        first = first or time.time() - start
+        print(piece, end="", flush=True)
+print(f"\nfirst token {first:.2f}s, total {time.time() - start:.2f}s")</code></pre>
+  <p>Then answer these in your notes:</p>
+  <ol>
+    <li><b>Part A.</b> Set <code>max_tokens=5</code> and rerun. What is <code>finish_reason</code> now?</li>
+    <li><b>Part B.</b> You have just run a cloze experiment on a model. How many distinct words at each temperature? Does it match Try it 3?</li>
+    <li><b>Part C.</b> What fraction of the total time had passed when the first token arrived?</li>
+    <li><b>Statelessness.</b> Write Part D yourself: tell the model your favourite Arabic root in one request, then in a <i>separate</i> request ask what it is. Then do it properly by sending the history. Keep both outputs.</li>
+    <li><b>The language tax, measured.</b> Send the English sentence from Lesson 1's lab and then its Arabic translation, each as a lone user message with <code>max_tokens=1</code>, and compare <code>usage.prompt_tokens</code>. This is the model's real tokenizer, not an approximation.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l03-notes" dir="auto" style="min-height:140px"></textarea>
+  <details>
+    <summary>Stuck on step 4? Open the shape of the answer</summary>
+    <p>The second request must contain three messages: your first user message, the assistant's reply to it (copied from the first response, with role <code>assistant</code>), and the new user question. If you send only the new question, the model has nothing to go on. That is all "memory" is.</p>
+  </details>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l03-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on n-gram language models: probability of a sequence, perplexity, and sampling from a model. Your bigram sampler from Lesson 1 is the model in this chapter.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l03-r2"><label for="r2"><b>Required.</b> The <a href="https://openrouter.ai/docs/quickstart">OpenRouter quickstart</a> and its API reference page on request parameters. Find three parameters this lesson did not cover and write one line on each.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l03-r3"><label for="r3"><b>Optional.</b> Holtzman et al. (2019), <a href="https://arxiv.org/abs/1904.09751">The Curious Case of Neural Text Degeneration</a>, the paper that introduced nucleus (top‑p) sampling. Read the introduction and look at the figures comparing human and machine text.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 4:</b> you ask a model for the part of speech of <i>book</i> in "Book a flight". It might reply <i>VERB</i>, or <i>It's a verb.</i>, or a paragraph. Your program needs exactly one tag. How would you guarantee that?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w01-l2-embeddings.html">← Lesson 2</a> · <a href="../index.html">Course map</a> · <a href="w02-l4-structured.html">Lesson 4 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson03.js"></script>
+</body>
+</html>
