@@ -11,9 +11,9 @@ window.COURSE = {
         { n: 1, title: "How models see text", ling: "Morphology: morphemes, roots and patterns",
           lessons: [
             { id: "l01", title: "From text to tokens", href: "lessons/w01-l1-tokens.html", mins: 60 },
-            { id: "l02", title: "Embeddings: meaning as geometry" }
+            { id: "l02", title: "Embeddings: meaning as geometry", href: "lessons/w01-l2-embeddings.html", mins: 60 }
           ],
-          reading: "SLP3, the chapter on words and tokens (BPE section)" },
+          reading: "SLP3, the chapters on words and tokens (BPE section) and on vector semantics and embeddings" },
         { n: 2, title: "Talking to models from code", ling: "Language as a probability distribution",
           lessons: [
             { id: "l03", title: "Your first API call: messages, sampling, streaming" },

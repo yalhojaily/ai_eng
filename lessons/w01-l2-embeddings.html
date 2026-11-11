@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2: Embeddings, meaning as geometry</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 1 · Week 1 · Lesson 2 · about 60 minutes</div>
+    <h1>Embeddings: meaning as geometry</h1>
+    <p class="lede">Lesson 1 ended with a puzzle: token IDs are arbitrary numbers, so where does a model keep the fact that <i>cat</i> and <i>kitten</i> are related? The answer is an old idea from linguistics, turned into arithmetic.</p>
+    <ul class="toc">
+      <li><a href="#table">1 The lookup table</a></li>
+      <li><a href="#company">2 Company</a></li>
+      <li><a href="#cosine">3 Similarity</a></li>
+      <li><a href="#dense">4 Dense vectors</a></li>
+      <li><a href="#context">5 Context</a></li>
+      <li><a href="#engineer">6 Why you care</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain what an embedding is and where it sits inside a model.</li>
+      <li>State the distributional hypothesis and build word vectors from it by counting.</li>
+      <li>Compute and interpret cosine similarity.</li>
+      <li>Tell a static word embedding from a contextual one, and say which you need for search.</li>
+    </ul>
+  </div>
+
+  <h2 id="table">1. The first thing a model does with a token</h2>
+  <p>A token ID is a row number. The model owns a big table, the <b>embedding table</b>, with one row per vocabulary entry. Each row is a list of numbers, a <b>vector</b>, typically hundreds or thousands long. The very first step of the model is a lookup: replace every ID with its row.</p>
+  <div class="flow" aria-label="Token becomes ID, ID selects a row of the embedding table, the row is a vector">
+    <div class="box">token<small>cat</small></div><span class="arr">→</span>
+    <div class="box">ID<small>8415</small></div><span class="arr">→</span>
+    <div class="box">row 8415<small>[0.21, −1.30, 0.07, …]</small></div><span class="arr">→</span>
+    <div class="box">rest of the model</div>
+  </div>
+  <p>The numbers shown are invented. The real ones are not written by anyone: they start random and are adjusted during training, along with every other parameter, to make next-token prediction better. So the answer to the puzzle is this: <b>the IDs carry no meaning, the rows do</b>. Training pushes the rows for <i>cat</i> and <i>kitten</i> close together, because treating them alike helps prediction.</p>
+  <p>Why would it help? Because of how language works.</p>
+
+  <h2 id="company">2. The linguist's idea: meaning is the company a word keeps</h2>
+  <p>In the 1950s the linguists Zellig Harris and J. R. Firth argued that words occurring in similar contexts tend to have similar meanings. Firth's version is the famous one: <q>You shall know a word by the company it keeps.</q> This is the <b>distributional hypothesis</b>.</p>
+  <p>Test it on yourself. You have never seen the word <i>wug</i>, but read: <i>"She fed the wug. The wug slept on the sofa. The wug chased a mouse."</i> You now know roughly what a wug is, purely from its neighbours.</p>
+  <p>That gives a recipe a computer can follow without understanding anything: for each word, <b>count the words that appear near it</b>. The list of counts is a vector. Words with similar count-lists should be similar in meaning.</p>
+
+  <div class="try" id="dist">
+    <span class="label">Try it · 1</span>
+    <h3>Build word vectors by counting</h3>
+    <label for="d-corpus" class="small">A toy corpus. Everything below is computed from it live, in your browser. Edit it freely; one sentence per full stop.</label>
+    <textarea id="d-corpus" dir="auto" style="min-height:130px"></textarea>
+    <div class="row">
+      <button id="d-reset" type="button">Restore original</button>
+      <button id="d-tiger" type="button">Add three “tiger” sentences</button>
+    </div>
+    <div class="row">
+      <label for="d-word" class="small">Inspect the word</label>
+      <select id="d-word" style="font:inherit;padding:7px 10px;border-radius:9px;border:1.5px solid var(--line);background:var(--paper);color:var(--ink)"></select>
+    </div>
+    <div class="small">Its company (words within two positions, with counts; very common words like “the” are ignored):</div>
+    <div class="out chips" id="d-ctx"></div>
+    <div class="small">Words whose company is most similar:</div>
+    <div class="bars" id="d-nn"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Inspect <code>cat</code>, then <code>coffee</code>, then <code>king</code>. Nobody told the program about animals, drinks or royalty. Then press the tiger button and inspect <code>tiger</code>: a brand-new word gets a meaning from three sentences. Finally, write your own sentences that use <code>tea</code> the way the corpus uses <code>dog</code>, and watch its neighbours change.</p>
+  </div>
+
+  <h2 id="cosine">3. Measuring "similar": cosine similarity</h2>
+  <p>The neighbour list above needed a number for "how alike are two vectors". The standard choice is <b>cosine similarity</b>: the cosine of the angle between them.</p>
+  <ul>
+    <li><b>1</b>: pointing the same way. Same kind of company.</li>
+    <li><b>0</b>: at right angles. Nothing in common.</li>
+    <li><b>−1</b>: pointing opposite ways.</li>
+  </ul>
+  <p>It is computed from the <b>dot product</b> (multiply matching entries, add them up) divided by the two lengths:</p>
+  <pre><code>cosine(a, b) = (a · b) / (|a| × |b|)</code></pre>
+  <p>Dividing by the lengths is the point. A frequent word has big counts and so a long vector, but length says how often a word appears, not what it means. Angle ignores length.</p>
+
+  <div class="try" id="cos">
+    <span class="label">Try it · 2</span>
+    <h3>Angle matters, length does not</h3>
+    <svg id="cos-svg" viewBox="0 0 320 190" role="img" aria-label="Two vectors from a common origin" style="width:100%;max-width:420px;display:block;margin:auto"></svg>
+    <div class="row"><label for="cos-ang" class="small" style="min-width:150px">Angle between <b id="cos-av">40°</b></label><input id="cos-ang" type="range" min="0" max="180" step="1" value="40"></div>
+    <div class="row"><label for="cos-len" class="small" style="min-width:150px">Length of <b style="color:var(--accent)">b</b> <b id="cos-lv">1.0</b></label><input id="cos-len" type="range" min="0.4" max="1.6" step="0.1" value="1"></div>
+    <div class="out" id="cos-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice:</b> stretch <b>b</b> and the dot product changes but the cosine does not. Sweep the angle through 90° and the cosine crosses zero.</p>
+  </div>
+
+  <h2 id="dense">4. From count-lists to dense embeddings</h2>
+  <p>Count vectors work, but they are awkward: one entry per vocabulary word, so tens of thousands of entries, nearly all zero. These are called <b>sparse</b> vectors.</p>
+  <p>Modern embeddings are <b>dense</b>: a few hundred to a few thousand numbers, none of them tied to a particular context word, all of them learned. The breakthrough that made this practical was <b>word2vec</b> (Mikolov and colleagues, 2013): instead of counting neighbours, train a small network to <i>predict</i> a word's neighbours, then keep the learned row for each word. Predicting company and counting company capture the same information; prediction just compresses it.</p>
+  <p>A language model's embedding table is the same idea, learned as a side effect of next-token prediction. To see what such a space looks like, here are the vectors from your toy corpus squeezed down to two dimensions, arranged so that distance on the page matches difference in company as closely as a flat page allows.</p>
+
+  <div class="try" id="map">
+    <span class="label">Try it · 3</span>
+    <h3>A map of meaning</h3>
+    <svg id="map-svg" viewBox="0 0 340 340" role="img" aria-label="Words from the corpus plotted in two dimensions" style="width:100%;display:block;background:var(--paper);border-radius:10px"></svg>
+    <p class="small" style="margin:8px 0 0"><b>Read it like this:</b> distance means difference in company. Find the animals, the drinks and the royals. The map redraws when you edit the corpus in Try it 1, so add the tiger sentences and see where it lands. Two dimensions cannot hold everything, so some neighbours on the map are accidents of the squeeze; trust the neighbour list above over the picture.</p>
+  </div>
+
+  <div class="note"><b>The famous party trick.</b> In good word embeddings, directions carry meaning: the step from <i>man</i> to <i>woman</i> is close to the step from <i>king</i> to <i>queen</i>, so <i>king − man + woman</i> lands near <i>queen</i>. It is real, and you will run it in the lab, but it works for some relations much better than others. Treat it as evidence that the geometry encodes structure, not as a reliable tool.</div>
+
+  <h2 id="context">5. One row per word is not enough</h2>
+  <p>Everything so far gives each word a single vector. Linguists will spot the problem at once: words have several senses. Decide the sense in each sentence below.</p>
+  <div id="sense-box"></div>
+  <p>You resolved every one using the surrounding words. A table lookup cannot: it returns the same row for <i>bank</i> every time, a blur of all its senses. Arabic makes this sharper, because short vowels are normally left unwritten, so <span class="ar">ذهب</span> is both the noun <i>gold</i> and the verb <i>he went</i> until context decides. Vectors of this kind are called <b>static embeddings</b>.</p>
+  <p>This is what the rest of a language model is for. The layers after the lookup repeatedly mix each token's vector with the vectors around it, so that what comes out for <i>bank</i> in a sentence about rivers differs from what comes out in a sentence about loans. Those are <b>contextual embeddings</b>.</p>
+  <table>
+    <tr><th></th><th>Static</th><th>Contextual</th></tr>
+    <tr><td>One vector per</td><td>word type</td><td>word in a particular sentence</td></tr>
+    <tr><td>Handles several senses</td><td>No</td><td>Yes</td></tr>
+    <tr><td>Where you meet it</td><td>word2vec, GloVe; the input table of an LLM</td><td>inside every LLM; embedding models</td></tr>
+  </table>
+  <p>One more step gets you to the tool you will actually use. An <b>embedding model</b> reads a whole sentence or passage and returns a <i>single</i> vector for all of it. Two passages that mean similar things get nearby vectors, even with no words in common, and with a multilingual model, even across languages.</p>
+
+  <h2 id="engineer">6. Why an engineer cares</h2>
+  <p>"Turn text into a vector, compare vectors" is one of the two or three most-used operations in applied AI:</p>
+  <ul>
+    <li><b>Semantic search.</b> Embed every document once, embed the query, return the nearest. This is the core of retrieval in Phase 4.</li>
+    <li><b>Clustering and deduplication.</b> Group support tickets, find near-identical passages.</li>
+    <li><b>Classification with few examples.</b> Label a text by its nearest labelled neighbours.</li>
+    <li><b>Evaluation.</b> A rough check of whether an answer means the same as a reference.</li>
+  </ul>
+  <p>Three practical facts to carry forward. Vectors from different embedding models are not comparable, so if you change model you re-embed everything. Similarity is not truth: "the drug is safe" and "the drug is not safe" share almost all their company and usually land close together. And quality varies by language, which you should measure, not assume.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: real embeddings</h2>
+  <p><b>Time:</b> 45 minutes. <b>You need:</b> <code>pip install gensim numpy</code>. The first run downloads a set of pretrained English word vectors (GloVe, roughly 65 MB).</p>
+  <p><b>Part A. Static word vectors.</b> Before running, predict: what are the five nearest neighbours of <code>bank</code>? Will they be about money, rivers, or both?</p>
+<pre><code>import numpy as np
+import gensim.downloader as api
+
+wv = api.load("glove-wiki-gigaword-50")   # 50 numbers per word
+
+def cosine(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+print(wv["cat"][:8])                       # a row of the table
+print(cosine(wv["cat"], wv["kitten"]))     # your function
+print(wv.similarity("cat", "kitten"))      # the library's: should match
+print(cosine(wv["cat"], wv["coffee"]))
+
+print(wv.most_similar("bank", topn=5))
+print(wv.most_similar(positive=["king", "woman"], negative=["man"], topn=3))</code></pre>
+  <ol>
+    <li>Check your <code>cosine</code> against <code>wv.similarity</code>.</li>
+    <li>Compare the neighbours of <code>bank</code> with your prediction. What does the result tell you about static embeddings?</li>
+    <li>Try five analogies of your own in different areas: capital cities, verb tenses (<code>walking : walked :: swimming : ?</code>), plurals, opposites. Record which relations work and which fail.</li>
+  </ol>
+  <p><b>Part B. Sentence vectors across languages (optional, larger download).</b> <code>pip install sentence-transformers</code>, then:</p>
+<pre><code>from sentence_transformers import SentenceTransformer, util
+
+model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+sentences = [
+    "The students will write their lessons in the library.",
+    "سيكتب الطلاب دروسهم في المكتبة.",
+    "He deposited the money in the bank.",
+    "We sat on the bank of the river.",
+    "The drug is safe.",
+    "The drug is not safe.",
+]
+emb = model.encode(sentences)
+print(util.cos_sim(emb, emb).numpy().round(2))</code></pre>
+  <ol start="4">
+    <li>Is the Arabic sentence closest to its English translation? That is cross-lingual similarity with no shared words at all.</li>
+    <li>How similar are the two <i>bank</i> sentences, compared with what Part A led you to expect?</li>
+    <li>How similar are the two <i>drug</i> sentences? Write one line on what that means for a search system in medicine or law.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l02-notes" dir="auto" style="min-height:140px"></textarea>
+  <details>
+    <summary>What to look for in step 2</summary>
+    <p>A static vector for <i>bank</i> is trained on every occurrence of the string, so its neighbours reflect whichever sense dominates the training text, with the others mixed in or drowned out. Whatever mix you observe, the point is that there is exactly one list: the table cannot give you a "river" list and a "money" list.</p>
+  </details>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l02-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on vector semantics and embeddings: lexical semantics, the distributional hypothesis, cosine, and word2vec. Skim the tf-idf material; it returns in Phase 4.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l02-r2"><label for="r2"><b>Required.</b> Mikolov, Chen, Corrado &amp; Dean (2013), <a href="https://arxiv.org/abs/1301.3781">Efficient Estimation of Word Representations in Vector Space</a>. Read the introduction and the section on results with analogies. Compare their analogy categories with what you found in the lab.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l02-r3"><label for="r3"><b>Optional.</b> Jay Alammar's article "The Illustrated Word2vec", for a visual walk through how the vectors are trained.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 3:</b> in Lesson 1 you sampled from a probability distribution by pressing a button. When you call a real model through an API, who presses the button, and which settings do you get to control?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w01-l1-tokens.html">← Lesson 1</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson02.js"></script>
+</body>
+</html>
