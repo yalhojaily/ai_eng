@@ -1,0 +1,152 @@
+// The whole course as data. A lesson becomes clickable once it has an `href`.
+window.COURSE = {
+  title: "AI Engineering, through the lens of language",
+  book: { name: "Jurafsky & Martin, Speech and Language Processing (3rd ed. draft)", url: "https://web.stanford.edu/~jurafsky/slp3/" },
+  phases: [
+    {
+      id: "p1", name: "Foundations", color: "c1",
+      goal: "Understand what a language model actually receives and returns, and talk to one from code.",
+      project: "Tokenizer explorer: show how models split Arabic and English words, and how well the pieces line up with real morphemes.",
+      weeks: [
+        { n: 1, title: "How models see text", ling: "Morphology: morphemes, roots and patterns",
+          lessons: [
+            { id: "l01", title: "From text to tokens", href: "lessons/w01-l1-tokens.html", mins: 60 },
+            { id: "l02", title: "Embeddings: meaning as geometry" }
+          ],
+          reading: "SLP3, the chapter on words and tokens (BPE section)" },
+        { n: 2, title: "Talking to models from code", ling: "Language as a probability distribution",
+          lessons: [
+            { id: "l03", title: "Your first API call: messages, sampling, streaming" },
+            { id: "l04", title: "Structured output and tool calling" }
+          ],
+          reading: "SLP3, the chapter on n-gram language models", milestone: "Ship the tokenizer explorer" }
+      ]
+    },
+    {
+      id: "p2", name: "Prompt and context engineering", color: "c2",
+      goal: "Get reliable behaviour out of a model by controlling what it reads.",
+      project: "Linguistic annotator: POS tags, lemmas and morphological features as validated JSON, zero-shot versus few-shot.",
+      weeks: [
+        { n: 3, title: "Writing prompts that work", ling: "Parts of speech and lemmas",
+          lessons: [
+            { id: "l05", title: "Anatomy of a prompt" },
+            { id: "l06", title: "Few-shot examples and task decomposition" }
+          ],
+          reading: "SLP3, the chapter on sequence labeling for parts of speech" },
+        { n: 4, title: "Context is a budget", ling: "Morphological features: gender, number, case, aspect",
+          lessons: [
+            { id: "l07", title: "Choosing what goes in the context window" },
+            { id: "l08", title: "Prompt chains and validation" }
+          ],
+          reading: "Universal Dependencies annotation guidelines: UPOS and features", milestone: "Ship the annotator" }
+      ]
+    },
+    {
+      id: "p3", name: "Evaluation", color: "c3",
+      goal: "Replace \"it looks right\" with numbers you can defend.",
+      project: "Score your annotator against a Universal Dependencies treebank: per-tag accuracy and a confusion matrix.",
+      weeks: [
+        { n: 5, title: "Measuring before improving", ling: "Gold-standard corpora and treebanks",
+          lessons: [
+            { id: "l09", title: "Why evals come first; building a test set" },
+            { id: "l10", title: "Accuracy, precision, recall, F1, confusion matrices" }
+          ],
+          reading: "SLP3, evaluation sections of the classification chapter" },
+        { n: 6, title: "Evals that scale", ling: "Inter-annotator agreement",
+          lessons: [
+            { id: "l11", title: "Model-graded evals and their traps" },
+            { id: "l12", title: "Regression-testing prompts like code" }
+          ],
+          reading: "A paper on annotator agreement (Cohen's kappa) in corpus annotation", milestone: "Ship the eval harness" }
+      ]
+    },
+    {
+      id: "p4", name: "Retrieval", color: "c4",
+      goal: "Give a model knowledge it was never trained on, and prove the right passages were found.",
+      project: "Semantic search over a text corpus with cross-lingual queries (ask in Arabic, retrieve English), measured with recall@k.",
+      weeks: [
+        { n: 7, title: "Search by meaning", ling: "Distributional semantics: meaning from context",
+          lessons: [
+            { id: "l13", title: "From word counts to dense vectors" },
+            { id: "l14", title: "Chunking and indexing a corpus" }
+          ],
+          reading: "SLP3, the chapter on vector semantics and embeddings" },
+        { n: 8, title: "Hybrid retrieval", ling: "Lexical versus semantic similarity",
+          lessons: [
+            { id: "l15", title: "Keyword search (BM25) plus vectors" },
+            { id: "l16", title: "Reranking and retrieval metrics" }
+          ],
+          reading: "SLP3, the chapter on information retrieval" },
+        { n: 9, title: "Grounded answers", ling: "Cross-lingual meaning",
+          lessons: [
+            { id: "l17", title: "Generating answers with citations" },
+            { id: "l18", title: "Cross-lingual retrieval" }
+          ],
+          reading: "One paper on multilingual sentence embeddings", milestone: "Ship the semantic search" }
+      ]
+    },
+    {
+      id: "p5", name: "Agents and tools", color: "c5",
+      goal: "Let a model plan, call tools and recover from its own mistakes.",
+      project: "Corpus research agent with concordance, frequency and dictionary tools that writes sourced usage reports.",
+      weeks: [
+        { n: 10, title: "The agent loop", ling: "Corpus linguistics: concordance and collocation",
+          lessons: [
+            { id: "l19", title: "Think, act, observe: the loop" },
+            { id: "l20", title: "Designing tools a model can use well" }
+          ],
+          reading: "An introduction to corpus linguistics methods (KWIC, collocations)" },
+        { n: 11, title: "Memory, planning, failure", ling: "Register and genre variation",
+          lessons: [
+            { id: "l21", title: "Memory and planning" },
+            { id: "l22", title: "Failure modes: loops, compounding errors, prompt injection" }
+          ],
+          reading: "A survey article on LLM agents" },
+        { n: 12, title: "Build and test the agent", ling: "Word usage across genres",
+          lessons: [
+            { id: "l23", title: "Building the corpus research agent" },
+            { id: "l24", title: "Evaluating agents" }
+          ],
+          reading: "One corpus-based study of a word's usage, as a model for your reports", milestone: "Ship the research agent" }
+      ]
+    },
+    {
+      id: "p6", name: "Production", color: "c6",
+      goal: "Run it for real: see what it does, what it costs, and when it gets worse.",
+      project: "Deploy the agent with tracing, caching and a cost budget.",
+      weeks: [
+        { n: 13, title: "Seeing inside", ling: "Error analysis as linguistic analysis",
+          lessons: [
+            { id: "l25", title: "Tracing and logging" },
+            { id: "l26", title: "Monitoring quality drift" }
+          ],
+          reading: "A practitioner write-up on LLM observability" },
+        { n: 14, title: "Cost and safety", ling: "Ambiguity and adversarial input",
+          lessons: [
+            { id: "l27", title: "Caching, model routing, cost control" },
+            { id: "l28", title: "Guardrails and deployment" }
+          ],
+          reading: "A practitioner write-up on prompt injection defences", milestone: "Deploy the agent" }
+      ]
+    },
+    {
+      id: "p7", name: "Model adaptation", color: "c7",
+      goal: "Know when changing the model beats changing the prompt, and how to do it.",
+      project: "Fine-tune a small open model on diacritization (tashkeel) or dialect identification; compare with a prompted large model. Then the capstone workbench.",
+      weeks: [
+        { n: 15, title: "Changing the model", ling: "What models learn about syntax and phonology",
+          lessons: [
+            { id: "l29", title: "When fine-tuning beats prompting and retrieval" },
+            { id: "l30", title: "Fine-tuning a small open model" }
+          ],
+          reading: "SLP3, the chapters on transformers and large language models" },
+        { n: 16, title: "Capstone", ling: "Putting linguistic analysis to work",
+          lessons: [
+            { id: "l31", title: "Running open models locally; quantization" },
+            { id: "l32", title: "Capstone: the linguistic analysis workbench" }
+          ],
+          reading: "Your own write-up: what worked, what the evals showed", milestone: "Ship the capstone" }
+      ]
+    }
+  ]
+};

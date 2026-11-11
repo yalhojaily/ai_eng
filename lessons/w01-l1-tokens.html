@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1: From text to tokens</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 1 · Week 1 · Lesson 1 · about 60 minutes</div>
+    <h1>From text to tokens</h1>
+    <p class="lede">A language model never sees your text. It sees a list of numbers. This lesson is about the step in between, and why that step decides what your application costs, how much it can read, and which languages it handles well.</p>
+    <ul class="toc">
+      <li><a href="#predict">1 Prediction</a></li>
+      <li><a href="#tokens">2 Tokens</a></li>
+      <li><a href="#morph">3 Morphemes</a></li>
+      <li><a href="#bpe">4 BPE</a></li>
+      <li><a href="#arabic">5 Where it breaks</a></li>
+      <li><a href="#engineer">6 Why you care</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain what a language model computes, in one sentence.</li>
+      <li>Say what a token is, and why models use subwords instead of words or characters.</li>
+      <li>Run the byte-pair encoding algorithm by hand.</li>
+      <li>Explain why the same sentence costs more in some languages than others.</li>
+    </ul>
+  </div>
+
+  <h2 id="predict">1. One job: predict the next piece</h2>
+  <p>Strip away the chat window and a large language model does exactly one thing. Given a sequence of pieces of text, it outputs a probability for every piece that could come next. To write a paragraph, the surrounding program picks one piece from that distribution, appends it, and asks again.</p>
+  <div class="flow" aria-label="Text becomes tokens, tokens become IDs, the model outputs probabilities, one token is sampled and appended">
+    <div class="box">text<small>"the cat"</small></div><span class="arr">→</span>
+    <div class="box">tokens<small>the · cat</small></div><span class="arr">→</span>
+    <div class="box">IDs<small>[1820, 8415]</small></div><span class="arr">→</span>
+    <div class="box">model<small>P(next)</small></div><span class="arr">→</span>
+    <div class="box">sample<small>"sat"</small></div><span class="arr">↺</span>
+  </div>
+  <p>The IDs above are made up for illustration. Everything else in this course, prompts, retrieval, agents, is a way of arranging the input so that the most probable continuation is the one you want.</p>
+  <p>You can feel how this works with a model small enough to inspect. The one below was "trained" in your browser by counting, in a few dozen sentences, which word follows which. That is a <b>bigram model</b>: it looks at only one previous word. A real LLM looks at thousands of previous tokens and uses a neural network instead of a count table, but the loop is identical.</p>
+
+  <div class="try" id="bigram">
+    <span class="label">Try it · 1</span>
+    <h3>Be the sampler</h3>
+    <p class="small">Each press runs one step of the loop. Nothing moves until you press.</p>
+    <div class="out gen" id="bg-text" aria-live="polite"></div>
+    <div class="small">Probabilities for the next word, given the last one:</div>
+    <div class="bars" id="bg-bars"></div>
+    <div class="row">
+      <label for="bg-temp" class="small">Temperature <b id="bg-tv">1.0</b></label>
+      <input id="bg-temp" type="range" min="0.2" max="2" step="0.1" value="1">
+    </div>
+    <div class="row">
+      <button class="primary" id="bg-sample" type="button">Sample next word</button>
+      <button id="bg-greedy" type="button">Take the most likely</button>
+      <button id="bg-reset" type="button">Reset</button>
+    </div>
+    <p class="small" style="margin:0"><b>Notice:</b> press "Take the most likely" repeatedly and the text falls into a loop. Raise the temperature and the bars flatten, so rare words get picked more often. Lower it and the top bar dominates. You will meet this same <code>temperature</code> setting in every model API.</p>
+  </div>
+
+  <h2 id="tokens">2. What counts as a "piece"?</h2>
+  <p>The model needs a fixed list of pieces, its <b>vocabulary</b>, because its output is one probability per entry in that list. So someone has to decide what the entries are. There are three obvious choices, and two of them fail.</p>
+  <table>
+    <tr><th>Unit</th><th>Vocabulary</th><th>Problem</th></tr>
+    <tr><td>Words</td><td>Millions, and never complete</td><td>Any new word, name or typo is unknown. Languages that build long words make it far worse.</td></tr>
+    <tr><td>Characters</td><td>Tiny</td><td>Sequences become very long, and the model must relearn spelling before it can learn meaning.</td></tr>
+    <tr><td><b>Subwords</b></td><td>Tens of thousands to a few hundred thousand</td><td>A compromise: common words are one piece, rare words are assembled from several.</td></tr>
+  </table>
+  <p>A <b>token</b> is one entry in that subword vocabulary. A common word like <code>the</code> is a single token. A rarer word like <code>tokenization</code> may come out as <code>token</code> + <code>ization</code>. Nothing is ever "unknown", because in the worst case a word is spelled out piece by piece.</p>
+  <div class="note"><b>Hold this thought.</b> Splitting <i>tokenization</i> into <i>token</i> + <i>ization</i> looks like something a linguist would do. Is the machine doing linguistics? Sometimes, by accident. The next two sections show what linguists mean by a "piece", then how the machine finds its own.</div>
+
+  <h2 id="morph">3. The linguist's piece: the morpheme</h2>
+  <p>A <b>morpheme</b> is the smallest unit of language that carries meaning. <i>Cats</i> has two: <i>cat</i> (the animal) and <i>-s</i> (more than one). You cannot split <i>cat</i> further without losing the meaning, so it is one morpheme.</p>
+  <p>Morphemes that can stand alone are <b>free</b> (<i>cat</i>, <i>read</i>). Those that must attach to something are <b>bound</b> (<i>re-</i>, <i>-ing</i>, <i>-s</i>). Languages differ hugely in how much they pack into one word. English packs little. Arabic, Turkish and Finnish pack a lot: a single Arabic word can be an entire English sentence.</p>
+
+  <div class="try" id="splitter">
+    <span class="label">Try it · 2</span>
+    <h3>Cut words into morphemes</h3>
+    <p class="small">Tap between letters to place or remove a cut, then check. Arabic words read right to left and are shown as separate letters so you can cut between them.</p>
+    <div id="sp-items"></div>
+  </div>
+
+  <h2 id="bpe">4. The machine's piece: byte-pair encoding</h2>
+  <p>Nobody hands the model a list of morphemes. Its vocabulary is learned from raw text by a simple counting procedure called <b>byte-pair encoding</b> (BPE). It began as a data-compression trick and was adapted for neural translation by Sennrich and colleagues in 2016. Most current LLM tokenizers are variations on it.</p>
+  <p>The whole algorithm:</p>
+  <ol>
+    <li>Start with every word split into single characters.</li>
+    <li>Count every adjacent pair of pieces across the whole corpus.</li>
+    <li>Glue the most frequent pair into one new piece, everywhere it occurs.</li>
+    <li>Repeat until the vocabulary reaches the size you want.</li>
+  </ol>
+  <p>That is all. No dictionary, no grammar. Frequent sequences become single tokens simply because they are frequent.</p>
+
+  <div class="try" id="bpe-lab">
+    <span class="label">Try it · 3</span>
+    <h3>Train a tokenizer by hand</h3>
+    <label for="bpe-corpus" class="small">Training corpus (edit it, or load a preset). Repeating a word raises its count.</label>
+    <textarea id="bpe-corpus" dir="auto"></textarea>
+    <div class="row">
+      <button id="bpe-en" type="button">English preset</button>
+      <button id="bpe-ar" type="button">Arabic preset</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="bpe-step" type="button">Merge once</button>
+      <button id="bpe-5" type="button">Merge ×5</button>
+      <button id="bpe-reset" type="button">Start over</button>
+    </div>
+    <div class="out" id="bpe-next" dir="ltr" aria-live="polite"></div>
+    <div class="small">Words as currently split (count on the left; <code>_</code> marks the end of a word):</div>
+    <div class="vocab" id="bpe-vocab"></div>
+    <div class="small">Merge rules learned so far, in order:</div>
+    <ol class="merges" id="bpe-merges"></ol>
+    <hr style="border:0;border-top:1px dashed var(--line);margin:14px 0">
+    <label for="bpe-word" class="small">Now tokenize a word the tokenizer has never seen, using only the rules above:</label>
+    <input id="bpe-word" type="text" dir="auto" value="lowest">
+    <div class="out chips" id="bpe-tok"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> With the English preset, merge about 8 times, then tokenize <code>lowest</code>: it was never in the corpus, yet it splits into <code>low</code> + <code>est_</code>, pieces learned from other words. Then load the Arabic preset, merge 6 times, and watch which letter groups get glued. Keep that result in mind for the next section.</p>
+  </div>
+
+  <h2 id="arabic">5. Where the two kinds of piece disagree</h2>
+  <p>In the English preset, BPE found <i>low</i> and <i>est</i>, which are real morphemes. It found them because English mostly builds words by placing morphemes side by side, so a morpheme is also a frequent run of adjacent letters.</p>
+  <p>Arabic does not work that way. Much of its vocabulary is built from a <b>root</b> of (usually) three consonants that carries the core meaning, poured into a <b>pattern</b> of vowels and extra letters that carries the grammar. The root letters are not adjacent. Here is the root <span class="ar root">ك ت ب</span>, to do with writing:</p>
+  <table id="roots">
+    <tr><th>Word</th><th>Letters (root in orange)</th><th>Meaning</th></tr>
+  </table>
+  <p>A linguist sees one morpheme, the root, in all six words. BPE can only glue neighbours, so it can never produce a token that means "<span class="ar">ك‑ت‑ب</span> with gaps". When you ran the Arabic preset it glued whatever happened to sit together: the unbroken run <span class="ar">كت</span>, or a prefix with half a stem (<span class="ar">مكت</span>). Meanwhile <span class="ar">كاتب</span>, "writer", stayed in single letters, even though it shares its root with words that became one token. Useful for compression, but not the unit of meaning.</p>
+  <div class="note"><b>Two more wrinkles.</b> First, production tokenizers usually run BPE on <b>bytes</b>, not letters. In UTF‑8 an English letter is one byte and an Arabic letter is two, so Arabic starts from twice as many units. Second, the merge rules are learned from a corpus that is mostly English, so English sequences earn far more merges. Both push the same way: non-English text tends to shatter into more tokens per word.</div>
+  <p>Does that mean the model cannot understand Arabic morphology? No. The network on top of the tokenizer can and does learn that these fragments relate. But it has to spend capacity recovering structure that the tokenizer threw away, and you pay for the extra tokens. Measuring exactly how much is your Phase 1 project.</p>
+
+  <h2 id="engineer">6. Why an engineer cares</h2>
+  <p>Tokens are the unit of account for everything you will build:</p>
+  <ul>
+    <li><b>Cost.</b> Model APIs bill per token, input and output priced separately.</li>
+    <li><b>Capacity.</b> A model's context window, the most it can read at once, is a number of tokens, not words or pages.</li>
+    <li><b>Speed.</b> Output is generated one token at a time, so longer answers take proportionally longer.</li>
+    <li><b>Behaviour.</b> Oddities such as models miscounting the letters in a word come from the model seeing token IDs, not letters.</li>
+  </ul>
+  <p>A common rule of thumb for English is about four characters, or three quarters of a word, per token. Treat it as a rough guide for one language and one family of tokenizers. For anything that matters, count with the real tokenizer, which is exactly what the lab does.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <p>Five questions. Answer from memory first; each one explains itself after you choose.</p>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: count real tokens</h2>
+  <p><b>Time:</b> 30 to 40 minutes. <b>You need:</b> Python 3 and <code>pip install tiktoken</code>, an open-source tokenizer library that runs locally with no API key.</p>
+  <p><b>Before you run anything, write down a prediction:</b> for the same sentence in English and Arabic, which will use more tokens per word, and by roughly what factor?</p>
+<pre><code>import tiktoken
+
+enc = tiktoken.get_encoding("cl100k_base")
+
+samples = {
+    "english": "The students will write their lessons in the library.",
+    "arabic":  "سيكتب الطلاب دروسهم في المكتبة.",
+    "one_word": "وسيكتبونها",
+}
+
+for name, text in samples.items():
+    ids = enc.encode(text)
+    pieces = [enc.decode_single_token_bytes(i).decode("utf-8", errors="replace")
+              for i in ids]
+    words = len(text.split())
+    print(f"{name}: {words} words, {len(ids)} tokens, "
+          f"{len(ids) / words:.2f} tokens per word")
+    print("  ", pieces)</code></pre>
+  <p>Then do these four things:</p>
+  <ol>
+    <li>Compare tokens per word for the two sentences against your prediction.</li>
+    <li>Look at the Arabic pieces. Some print as <code>�</code>. Using section 5, explain why. (Hint: what unit does the tokenizer cut on?)</li>
+    <li>Take the token pieces for <span class="ar">وسيكتبونها</span> and compare them with the morpheme cuts you made in Try it 2. Does any token boundary match a morpheme boundary?</li>
+    <li>Add three sentences of your own in each language, of different styles, and check whether the ratio holds.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser; paste your numbers and your explanation for step 2)</span></label>
+  <textarea id="lab-notes" data-save="l01-notes" dir="auto" style="min-height:140px"></textarea>
+  <details>
+    <summary>Stuck on step 2? Open the explanation</summary>
+    <p>The tokenizer works on UTF‑8 bytes. An Arabic letter is two bytes, and a token boundary can fall between them. Decoding such a token alone gives half a character, which is not valid text, so Python substitutes the replacement character <code>�</code>. The full sequence still decodes perfectly; only the individual pieces look broken. Keep this script: it is the seed of the tokenizer explorer you ship at the end of Week 2.</p>
+  </details>
+
+  <h2 id="reading">Reading duties</h2>
+  <p>Tick these off as you go. Read them after the lesson, not before: they will land better.</p>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l01-r1"><label for="r1"><b>Required.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the chapter on words and tokens: read the parts on words, morphology and byte-pair encoding. Skip regular expressions and edit distance for now.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l01-r2"><label for="r2"><b>Required.</b> Sennrich, Haddow &amp; Birch (2016), <a href="https://arxiv.org/abs/1508.07909">Neural Machine Translation of Rare Words with Subword Units</a>. Read sections 1 to 3 only. It is the paper that brought BPE into NLP, and the motivation section is the argument of this lesson.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l01-r3"><label for="r3"><b>Optional.</b> Andrej Karpathy's video lecture "Let's build the GPT Tokenizer", if you want to see a byte-level BPE written from scratch in code.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 2:</b> one sentence answering this. If tokens are just ID numbers, and ID 4000 is no more similar to ID 4001 than to ID 9, where does the model keep the fact that <i>cat</i> and <i>kitten</i> are related?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="../index.html">Back to the course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson01.js"></script>
+</body>
+</html>
