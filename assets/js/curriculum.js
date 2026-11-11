@@ -92,22 +92,22 @@ window.COURSE = {
       weeks: [
         { n: 10, title: "The agent loop", ling: "Corpus linguistics: concordance and collocation",
           lessons: [
-            { id: "l19", title: "Think, act, observe: the loop" },
-            { id: "l20", title: "Designing tools a model can use well" }
+            { id: "l19", title: "Think, act, observe: the loop", href: "lessons/w10-l19-loop.html", mins: 70 },
+            { id: "l20", title: "Designing tools a model can use well", href: "lessons/w10-l20-tools.html", mins: 75 }
           ],
-          reading: "An introduction to corpus linguistics methods (KWIC, collocations)" },
+          reading: "The NLTK book, chapters 1 and 2; Church & Hanks (1990) on collocation" },
         { n: 11, title: "Memory, planning, failure", ling: "Register and genre variation",
           lessons: [
-            { id: "l21", title: "Memory and planning" },
-            { id: "l22", title: "Failure modes: loops, compounding errors, prompt injection" }
+            { id: "l21", title: "Memory and planning", href: "lessons/w11-l21-memory.html", mins: 75 },
+            { id: "l22", title: "Failure modes: loops, compounding errors, prompt injection", href: "lessons/w11-l22-failures.html", mins: 75 }
           ],
-          reading: "A survey article on LLM agents" },
+          reading: "Biber & Conrad on register; Greshake et al. (2023) on indirect prompt injection" },
         { n: 12, title: "Build and test the agent", ling: "Word usage across genres",
           lessons: [
-            { id: "l23", title: "Building the corpus research agent" },
-            { id: "l24", title: "Evaluating agents" }
+            { id: "l23", title: "Building the corpus research agent", href: "lessons/w12-l23-build.html", mins: 80 },
+            { id: "l24", title: "Evaluating agents", href: "lessons/w12-l24-agent-evals.html", mins: 75 }
           ],
-          reading: "One corpus-based study of a word's usage, as a model for your reports", milestone: "Ship the research agent" }
+          reading: "Sinclair, Corpus, Concordance, Collocation; Kapoor et al. (2024), AI Agents That Matter", milestone: "Ship the research agent" }
       ]
     },
     {

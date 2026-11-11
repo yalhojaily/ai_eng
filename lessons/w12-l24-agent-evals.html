@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 24: Evaluating agents</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 5 · Week 12 · Lesson 24 · about 75 minutes</div>
+    <h1>Evaluating agents</h1>
+    <p class="lede">An agent that worked when you tried it has been observed to work once. Agents take different paths on different runs, fail in ways a final answer hides, and cost amounts that vary by a factor of ten. Measuring them takes everything from Phase 3 and three new ideas.</p>
+    <ul class="toc">
+      <li><a href="#diff">1 What is different</a></li>
+      <li><a href="#truth">2 Ground truth</a></li>
+      <li><a href="#reliab">3 Reliability</a></li>
+      <li><a href="#traj">4 Trajectories</a></li>
+      <li><a href="#layers">5 Layers</a></li>
+      <li><a href="#practice">6 In practice</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+      <li><a href="#project">Project</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Build an agent eval whose answers are computed by code.</li>
+      <li>Measure reliability across repeated runs, not only average success.</li>
+      <li>Score a trajectory for efficiency and soundness as well as outcome.</li>
+      <li>Report cost alongside accuracy, and compare two agent versions fairly.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> Almost nothing. You know that one path, on one word, on one occasion, produced a report that convinced you. You do not know whether it would do so again, whether it works for other words, whether the report was right or merely fluent, or what it cost. Each of those gaps is a section of this lesson.</div>
+
+  <h2 id="diff">1. What makes agents harder to evaluate</h2>
+  <ul>
+    <li><b>They vary.</b> The same input can lead to different sequences of steps and different answers. One run is one sample.</li>
+    <li><b>There are many right paths.</b> You cannot compare the steps against a single reference sequence.</li>
+    <li><b>The outcome hides the process.</b> A correct answer reached by a lucky guess, or by twenty wasted calls, looks the same as a sound one.</li>
+    <li><b>Cost is part of the result.</b> Two agents of equal accuracy can differ tenfold in tokens and time.</li>
+  </ul>
+  <p>So an agent is measured on three things together: the <b>outcome</b> (was the result right?), the <b>trajectory</b> (was the path sound and economical?) and the <b>cost</b>.</p>
+
+  <h2 id="truth">2. Ground truth from code</h2>
+  <p>Your agent works over a corpus you hold, so a whole class of questions has answers a script can compute exactly. That gives you an outcome eval with no human labelling and no judge:</p>
+  <table>
+    <tr><th>Task for the agent</th><th>Ground truth from code</th></tr>
+    <tr><td>In which genre is <i>issue</i> most frequent per million words?</td><td>recount and normalise</td></tr>
+    <tr><td>Does <i>serendipity</i> occur in the fiction section?</td><td>search</td></tr>
+    <tr><td>What word most often follows <i>run</i> in news?</td><td>count the next word</td></tr>
+    <tr><td>Is <i>light</i> more often preceded by <i>the</i> or by <i>in</i> in learned prose?</td><td>count the previous word</td></tr>
+  </table>
+  <p>These are narrower than "describe how the word is used", and that is their value. An agent that cannot answer them reliably cannot be trusted with the open task, and when it fails, you know exactly which fact it got wrong. Include tasks whose true answer is "no" or "it does not occur": they test whether the agent reports absence correctly instead of inventing a finding.</p>
+  <p>For the open task, the report, combine three measures you already have: the verifier's pass rate (Lesson 23), a rubric scored by a validated judge (Lesson 11), and a sample you read yourself.</p>
+
+  <h2 id="reliab">3. Reliability: run it more than once</h2>
+  <p>Suppose an agent succeeds on a task 80% of the time. Try it once and you will most likely see it work, and conclude it works. A user who relies on it every day will see it fail one day in five. Averages over tasks hide this: "80% accuracy" could mean 80 tasks always solved and 20 never, or every task solved four times in five. These are very different products.</p>
+  <p>So run every task several times, and report two numbers: the average success rate, and the share of tasks solved on <b>every</b> one of k runs. The second is the measure of dependability, and it falls quickly as k rises.</p>
+
+  <div class="try" id="rel">
+    <span class="label">Try it · 1</span>
+    <h3>Once is not evidence</h3>
+    <div class="row"><label for="rl-p" class="small" style="min-width:190px">Chance of success per run <b id="rl-pv">80%</b></label><input id="rl-p" type="range" min="50" max="99" step="1" value="80"></div>
+    <div class="row"><label for="rl-k" class="small" style="min-width:190px">Runs <b id="rl-kv">5</b></label><input id="rl-k" type="range" min="1" max="20" step="1" value="5"></div>
+    <div class="bars" id="rl-bars"></div>
+    <div class="out" id="rl-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> At 80%, how likely is a single trial to succeed and mislead you? How many runs before "succeeds every time" drops below one in three? What per-run rate do you need for ten consecutive successes to be more likely than not?</p>
+  </div>
+
+  <h2 id="traj">4. Scoring the trajectory</h2>
+  <p>You saved every trace in Lesson 22. From a trace, code can compute:</p>
+  <ul>
+    <li><b>Efficiency</b>: steps, tool calls, tokens, seconds.</li>
+    <li><b>Waste</b>: repeated calls, calls whose results were never used, loop warnings triggered.</li>
+    <li><b>Soundness</b>: did it call <code>frequency</code> before making a claim about frequency? Did it examine every genre it made claims about? Were all cited IDs returned by some tool call in this run?</li>
+    <li><b>Health</b>: tool errors, gate rejections, retries, compactions, whether a limit was hit.</li>
+  </ul>
+  <p>Soundness checks are the important ones. They test the <i>method</i>, which is how you catch the right answer reached the wrong way, such as a correct frequency ranking stated from the model's memory with no tool call behind it.</p>
+
+  <div class="try" id="tj">
+    <span class="label">Try it · 2</span>
+    <h3>Three runs, one correct answer</h3>
+    <p class="small">Task: <i>in which genre is “run” most frequent?</i> All three runs give the correct genre. The table is computed from each trace.</p>
+    <div class="row" id="tj-tabs"></div>
+    <pre class="live" id="tj-trace" style="max-height:230px;overflow:auto"></pre>
+    <div style="overflow-x:auto"><table class="tight" id="tj-table"></table></div>
+    <div class="out" id="tj-out" aria-live="polite"></div>
+  </div>
+
+  <h2 id="layers">5. Three layers of testing</h2>
+  <p>As with any software, test the parts as well as the whole:</p>
+  <ul>
+    <li><b>Tools</b>: ordinary unit tests. <code>frequency("run")</code> returns the right numbers; an unknown genre returns the helpful error. No model involved, runs in milliseconds, and catches the bugs that would otherwise look like agent failures.</li>
+    <li><b>Single steps</b>: give the model a fixed context and check its next action. Given the question and a frequency result, does it ask for a concordance next? Useful for testing prompt changes cheaply.</li>
+    <li><b>Whole runs</b>: the outcome, trajectory and cost measures above. Slow and costly, so keep the task set small and well chosen.</li>
+  </ul>
+
+  <h2 id="practice">6. In practice</h2>
+  <ul>
+    <li><b>Twenty good tasks beat two hundred careless ones.</b> Each whole-run task is expensive. Choose tasks that cover the tools, the genres, absent words, ambiguous words and at least one planted injection.</li>
+    <li><b>Always report cost with accuracy.</b> "71% at 9,000 tokens per task" and "74% at 80,000" are both honest descriptions of real trade-offs. An accuracy figure alone invites the second without anyone having chosen it.</li>
+    <li><b>Compare versions with Lesson 12's tools.</b> Per-task diffs, fixed and broken lists, a sign test. With repeated runs, count a task as fixed only if it moved from mostly failing to mostly passing.</li>
+    <li><b>Keep reading traces.</b> Metrics tell you that step counts rose. Only reading shows you that the agent now checks every genre twice because of a sentence you added to the prompt.</li>
+    <li><b>Turn failures into tasks.</b> Every surprising trace from real use becomes a new item in the set (Lesson 12).</li>
+  </ul>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: an eval for your agent</h2>
+  <p><b>Time:</b> 3 hours, plus model time for the runs.</p>
+<pre><code>def truth_top_genre(word):
+    f = frequency(word)                      # your tool, called directly as a function
+    return max(GENRES, key=lambda g: f[g]["per_million"])
+
+def truth_occurs(word, genre):
+    return concordance(word, genre)["total"] > 0
+
+TASKS = [
+    {"id": "top-issue", "question": "In which genre is 'issue' most frequent per million words? "
+                                    "Answer with the genre name only.",
+     "check": lambda answer: truth_top_genre("issue") in answer.lower()},
+    {"id": "absent-1",  "question": "Does the word 'serendipity' occur in the fiction genre? "
+                                    "Answer yes or no, then one sentence.",
+     "check": lambda answer: answer.lower().startswith("yes" if truth_occurs("serendipity", "fiction") else "no")},
+    # ... 18 more: next-word and previous-word counts, comparisons, absent words, one injection ...
+]
+
+def trajectory_metrics(trace):
+    """trace: list of {"name": ..., "args": ..., "result": ...} for one run"""
+    calls = [(c["name"], json.dumps(c["args"], sort_keys=True)) for c in trace]
+    return {
+        "tool_calls": len(calls),
+        "repeated": len(calls) - len(set(calls)),
+        "errors": sum("error" in str(c["result"])[:40] for c in trace),
+        "used_frequency": any(n == "frequency" for n, _ in calls),
+    }
+
+def evaluate(tasks, runs=3):
+    rows = []
+    for task in tasks:
+        passes, tokens, steps = 0, 0, 0
+        for _ in range(runs):
+            answer, trace, usage = run_agent_traced(task["question"])   # returns all three
+            passes += bool(task["check"](answer))
+            tokens += usage; steps += len(trace)
+        rows.append({"id": task["id"], "pass_rate": passes / runs, "all_pass": passes == runs,
+                     "avg_tokens": tokens // runs, "avg_calls": steps / runs})
+    n = len(rows)
+    print(f"mean success {sum(r['pass_rate'] for r in rows) / n:.2f}   "
+          f"solved every time {sum(r['all_pass'] for r in rows) / n:.2f}   "
+          f"avg tokens {sum(r['avg_tokens'] for r in rows) // n}")
+    return rows</code></pre>
+  <ol>
+    <li>Write unit tests for your four tools first, with <code>pytest</code>. Fix whatever they find before blaming the agent for anything.</li>
+    <li>Complete <code>TASKS</code> to twenty items with code-computed checks. Change <code>run_agent</code> to return the answer, the list of tool calls with results, and total tokens.</li>
+    <li>Run the eval with three runs per task. Report mean success, the share solved every time, average tokens and average calls.</li>
+    <li>Find a task that passed on some runs and failed on others. Read both traces side by side. Where did they diverge?</li>
+    <li>Find a run that reached the right answer unsoundly, for example without calling <code>frequency</code>. Add a soundness check that would fail it.</li>
+    <li>Make one change to the agent: remove the planning step, or swap in a cheaper model. Rerun and compare with Lesson 12's diff: success, dependability, tokens.</li>
+    <li>Score the five reports from Lesson 23 on a three-criterion rubric yourself, then with a judge, and report kappa.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l24-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l24-r1"><label for="r1"><b>Required.</b> Kapoor et al. (2024), <a href="https://arxiv.org/abs/2407.01502">AI Agents That Matter</a>. Read the introduction and the sections on cost-controlled evaluation: why accuracy without cost misleads, and what goes wrong in agent benchmarks.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l24-r2"><label for="r2"><b>Required.</b> Yao et al. (2024), <a href="https://arxiv.org/abs/2406.12045">τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains</a>. Read the introduction and the part defining the reliability measure over repeated trials, the idea behind section 3.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l24-r3"><label for="r3"><b>Optional.</b> Read ten of your own agent's traces end to end and write one line on each. As in Lesson 10, this is the most informative reading available.</label></li>
+  </ul>
+
+  <h2 id="project">Phase 5 project: ship the corpus research agent</h2>
+  <p><b>Given a word, the agent investigates its use across genres and returns a verified report, and you can say with numbers how well and at what cost.</b></p>
+  <div class="card">
+    <h3>What to build</h3>
+    <ol>
+      <li>Four or five tools designed to Lesson 20's standard, with unit tests.</li>
+      <li>The agent: loop with limits and loop detection, plan and notes, compaction, tool results marked as data.</li>
+      <li>The report writer and the verifier, with retry on failure.</li>
+      <li>Your Phase 4 search system added as one more tool, so the agent can look up grammatical terms in the guidelines when it needs them.</li>
+      <li>A command-line interface that prints the report and saves the trace.</li>
+      <li>The eval, in your harness: twenty code-checked tasks run three times each, trajectory metrics, cost, and a judged rubric for reports.</li>
+    </ol>
+    <h3>What to hand in</h3>
+    <ul class="check">
+      <li><input type="checkbox" id="p1" data-save="p5-a"><label for="p1">The repository, with a README showing one full report and how to run the eval.</label></li>
+      <li><input type="checkbox" id="p2" data-save="p5-b"><label for="p2">A results table: mean success, share solved every time, average tokens, calls and seconds per task.</label></li>
+      <li><input type="checkbox" id="p3" data-save="p5-c"><label for="p3">A comparison of two versions of the agent, with the per-task diff and what you concluded.</label></li>
+      <li><input type="checkbox" id="p4" data-save="p5-d"><label for="p4">Injection test: how often a planted line corrupted the report, before and after your defences.</label></li>
+      <li><input type="checkbox" id="p5" data-save="p5-e"><label for="p5">Three reports with your own line-by-line assessment of whether the evidence supports each use.</label></li>
+      <li><input type="checkbox" id="p6" data-save="p5-f"><label for="p6">One page: where the agent is dependable, where it is not, and what you would not yet let it do unsupervised.</label></li>
+    </ul>
+    <p class="small" style="margin:0">Send me the link and the page. Phase 6 takes this agent and runs it as a service: traced, monitored, cached and deployed.</p>
+  </div>
+
+  <div class="note"><b>Bring to Lesson 25:</b> a user tells you the agent gave a strange answer yesterday afternoon. What would you need to have recorded, at the time, to find out why?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w12-l23-build.html">← Lesson 23</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/minicorpus.js"></script>
+<script src="../assets/js/lesson24.js"></script>
+</body>
+</html>

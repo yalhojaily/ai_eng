@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 19: Think, act, observe: the loop</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 5 · Week 10 · Lesson 19 · about 70 minutes</div>
+    <h1>Think, act, observe: the loop</h1>
+    <p class="lede">Everything you have built so far follows a path you laid down in code. An agent is what you get when the model chooses the path. The mechanism is small, a loop you could write in twenty lines, and the consequences are large.</p>
+    <ul class="toc">
+      <li><a href="#what">1 What an agent is</a></li>
+      <li><a href="#corpus">2 Corpus linguistics</a></li>
+      <li><a href="#loop">3 The loop</a></li>
+      <li><a href="#state">4 State</a></li>
+      <li><a href="#stop">5 Stopping</a></li>
+      <li><a href="#when">6 When to use one</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Distinguish a workflow from an agent, and say what each is good for.</li>
+      <li>Read a concordance and explain what corpus linguists use one for.</li>
+      <li>Write the agent loop and trace one run step by step.</li>
+      <li>Explain why every agent needs a step limit.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> The fixed sequence "retrieve, then answer" would have to become a decision made at run time: after each lookup, something must judge whether enough is known, and if not, choose the next lookup based on what was just found. Hand that judgement to the model, inside a loop, and you have an agent.</div>
+
+  <h2 id="what">1. Workflows and agents</h2>
+  <p>Lesson 8's chains are <b>workflows</b>: the steps and their order are written in your code, and the model fills in each step. In an <b>agent</b>, the model decides what to do next, using tools, repeatedly, until it judges the task done. Three ingredients, all of which you already have:</p>
+  <ul>
+    <li>a <b>model</b> that can request tools (Lesson 4);</li>
+    <li>a set of <b>tools</b>, ordinary functions with descriptions;</li>
+    <li>a <b>loop</b> that runs the requested tool, appends the result to the conversation, and asks the model again.</li>
+  </ul>
+  <p>The difference is who holds the steering wheel. That buys flexibility: an agent can handle questions whose solution path you could not have written down in advance. It costs predictability, and this phase is largely about getting that back.</p>
+
+  <h2 id="corpus">2. This phase's subject: corpus linguistics</h2>
+  <p>The agent you will build does a linguist's job. <b>Corpus linguistics</b> studies language by examining large collections of real text, called corpora, instead of consulting intuition. Asked how a word is used, a corpus linguist does not introspect. They look, with three basic instruments:</p>
+  <ul>
+    <li>a <b>concordance</b>: every occurrence of a word, each shown with a little context on either side, lined up on the word itself. This layout is called <b>KWIC</b>, "key word in context". Reading down the column, patterns jump out that no single sentence shows;</li>
+    <li><b>frequency</b>: how often the word occurs, overall and in different kinds of text;</li>
+    <li><b>collocation</b>: which other words turn up near it more often than chance would predict.</li>
+  </ul>
+  <p>These are the agent's tools. Try the first one yourself on a miniature corpus of 45 sentences in three genres, written for this course.</p>
+
+  <div class="try" id="kwic">
+    <span class="label">Try it · 1</span>
+    <h3>Read a concordance</h3>
+    <div class="row">
+      <label class="field" style="flex:1;min-width:140px"><span>Word (all its forms are found)</span><input id="kw-w" type="text" value="run"></label>
+      <label class="field"><span>Genre</span><select id="kw-g"><option value="">all</option></select></label>
+    </div>
+    <div class="row" id="kw-presets"></div>
+    <div class="out small" id="kw-sum" aria-live="polite"></div>
+    <div id="kw-lines" style="overflow-x:auto"></div>
+    <p class="small" style="margin:0"><b>Read down the column for <i>run</i>.</b> First all genres, then news only, then fiction only. What follows the word in news? What follows it in fiction? You have just done, by eye, the analysis the agent will do with tools. Then try <code>light</code> and <code>issue</code>.</p>
+  </div>
+
+  <h2 id="loop">3. The loop</h2>
+<pre><code>messages = [system, question]
+repeat:
+    reply = model(messages, tools)
+    append reply to messages
+    if reply has no tool calls:  stop, reply is the answer
+    for each tool call:
+        result = run the tool
+        append result to messages</code></pre>
+  <p>That is Lesson 4's tool loop, unchanged. Each trip round has three phases, often called <b>think, act, observe</b>: the model reasons about what it knows and needs, requests a tool, and reads the result. Then it thinks again, with one more fact in hand.</p>
+
+  <div class="try" id="trace">
+    <span class="label">Try it · 2</span>
+    <h3>Follow an agent</h3>
+    <p class="small">Question: <i>Is “run” used differently in news and in fiction?</i> The agent's reasoning is scripted. The tool results are real, computed from the same mini-corpus as above.</p>
+    <div class="row">
+      <button class="primary" id="tr-next" type="button">Next step</button>
+      <button id="tr-reset" type="button">Restart</button>
+    </div>
+    <div class="msgs" id="tr-msgs"></div>
+    <div class="out small" id="tr-info" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice:</b> nobody told the agent to check frequency before reading examples, or to look at the two genres separately. Those were its choices, and the second lookup depended on the first result. Also watch the counter: the request grows at every step.</p>
+  </div>
+
+  <h2 id="state">4. The agent's whole mind is the message list</h2>
+  <p>Recall Lesson 3: the model keeps nothing between requests. An agent's memory of what it has done <i>is</i> the list of messages, re-sent in full at every step. Two consequences follow, and they shape the next five lessons.</p>
+  <ul>
+    <li><b>Cost grows faster than the number of steps.</b> Step ten re-sends the results of steps one to nine. A run of twenty steps can bill many times the tokens of its final answer.</li>
+    <li><b>Tool results dominate the context.</b> The question is a sentence, the reasoning a few lines, and a careless tool can return thousands of tokens. What your tools return is, in effect, what your agent thinks about. Lesson 20 is about that.</li>
+  </ul>
+
+  <h2 id="stop">5. Stopping</h2>
+  <p>The loop above ends when the model replies without requesting a tool. Nothing guarantees that will happen. An agent can keep searching for something that is not there, or call the same tool again and again. So every real loop has hard limits enforced by your code, not by the model's judgement:</p>
+  <ul>
+    <li>a <b>maximum number of steps</b>;</li>
+    <li>a <b>budget</b> in tokens or money;</li>
+    <li>a <b>time limit</b>.</li>
+  </ul>
+  <p>When a limit is hit, stop and say so, returning whatever was found along with a clear statement that the run was cut short. An agent that silently runs for an hour is a bill. One that silently stops halfway and presents its partial work as complete is worse.</p>
+
+  <h2 id="when">6. When an agent is the right tool</h2>
+  <p>Lesson 8's rule still holds: start with the simplest thing. Use a single call if it works, a workflow if the steps are known. An agent earns its cost when the path really cannot be fixed in advance, the task tolerates some variation in how it is done, and a wrong step can be noticed and corrected.</p>
+  <div class="try">
+    <span class="label">Try it · 3</span>
+    <h3>Workflow or agent?</h3>
+    <div id="wa-box"></div>
+  </div>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: your first agent</h2>
+  <p><b>Time:</b> 90 minutes. <code>pip install nltk</code>. The corpus is the Brown corpus, a million words of American English from 1961 sorted into genres, which NLTK can download.</p>
+<pre><code>import json, nltk
+nltk.download("brown")
+from nltk.corpus import brown
+
+GENRES = ["news", "fiction", "learned", "romance", "government"]
+SENTS = {g: [" ".join(s) for s in brown.sents(categories=g)] for g in GENRES}
+WORDS = {g: [w.lower() for w in brown.words(categories=g)] for g in GENRES}
+
+def concordance(word, genre, limit=8):
+    lines = [s for s in SENTS[genre] if f" {word.lower()} " in f" {s.lower()} "]
+    return {"genre": genre, "total": len(lines), "shown": lines[:limit]}
+
+def frequency(word):
+    out = {}
+    for g in GENRES:
+        n = WORDS[g].count(word.lower())
+        out[g] = {"count": n, "per_million": round(n / len(WORDS[g]) * 1_000_000)}
+    return out
+
+FUNCTIONS = {"concordance": concordance, "frequency": frequency}
+TOOLS = [
+    {"type": "function", "function": {
+        "name": "concordance",
+        "description": "Show sentences from one genre of the corpus that contain the exact word form.",
+        "parameters": {"type": "object", "properties": {
+            "word": {"type": "string"},
+            "genre": {"type": "string", "enum": GENRES},
+            "limit": {"type": "integer", "description": "Maximum sentences to return (default 8)"}},
+            "required": ["word", "genre"]}}},
+    {"type": "function", "function": {
+        "name": "frequency",
+        "description": "Count an exact word form in every genre, raw and per million words.",
+        "parameters": {"type": "object", "properties": {"word": {"type": "string"}},
+                       "required": ["word"]}}},
+]
+
+def run_agent(question, max_steps=8):
+    messages = [
+        {"role": "system", "content": "You are a corpus linguist. Answer questions about word "
+         "usage only from evidence you obtain with the tools. Quote the sentences you rely on."},
+        {"role": "user", "content": question},
+    ]
+    for step in range(1, max_steps + 1):
+        r = client.chat.completions.create(model=MODEL, messages=messages, tools=TOOLS)
+        msg = r.choices[0].message
+        messages.append(msg)
+        print(f"--- step {step}: {r.usage.prompt_tokens} input tokens")
+        if not msg.tool_calls:
+            return msg.content
+        for call in msg.tool_calls:
+            args = json.loads(call.function.arguments)
+            print("   call:", call.function.name, args)
+            result = FUNCTIONS[call.function.name](**args)
+            messages.append({"role": "tool", "tool_call_id": call.id,
+                             "content": json.dumps(result)})
+    return "Stopped: step limit reached before an answer was produced."
+
+print(run_agent("Is 'run' used differently in news and in fiction?"))</code></pre>
+  <ol>
+    <li>Run it. How many steps did it take? Write down the input tokens at each step and the total.</li>
+    <li>Ask three more questions of your own about other words. Does the agent always check frequency? Always look at more than one genre?</li>
+    <li>Ask the same question three times. Are the paths identical? Are the conclusions?</li>
+    <li>Set <code>max_steps=2</code> and rerun. What does the user see? Improve the final message so that it reports what was found so far.</li>
+    <li>Ask about the word <i>the</i>. What happens to the token counts? Keep the numbers for Lesson 20.</li>
+    <li>The tools match one exact form: <i>run</i> but not <i>ran</i>. Does the agent notice and search the other forms itself? What would be a better design?</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l19-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l19-r1"><label for="r1"><b>Required.</b> Bird, Klein and Loper, <a href="https://www.nltk.org/book/">Natural Language Processing with Python</a> (the NLTK book, free online): chapter 1, sections on searching text and counting vocabulary, and chapter 2, the section on the Brown corpus. Run its concordance examples.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l19-r2"><label for="r2"><b>Required.</b> Anthropic's <a href="https://www.anthropic.com/engineering/building-effective-agents">Building effective agents</a>, which you began in Lesson 8: now read the sections on agents and on when to use them.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l19-r3"><label for="r3"><b>Optional.</b> Yao et al. (2022), <a href="https://arxiv.org/abs/2210.03629">ReAct: Synergizing Reasoning and Acting in Language Models</a>. Read the introduction and look at the first figure: the paper that popularised the think, act, observe pattern.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 20:</b> your concordance tool was asked for <i>the</i> and returned whatever it returned. What happened to the agent's context, and whose fault was that: the model's, or the tool's?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w09-l18-crosslingual.html">← Lesson 18</a> · <a href="../index.html">Course map</a> · <a href="w10-l20-tools.html">Lesson 20 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/minicorpus.js"></script>
+<script src="../assets/js/lesson19.js"></script>
+</body>
+</html>

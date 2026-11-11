@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 20: Designing tools a model can use well</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 5 · Week 10 · Lesson 20 · about 75 minutes</div>
+    <h1>Designing tools a model can use well</h1>
+    <p class="lede">An agent sees the world only through what its tools return. Give it clumsy tools and no prompt will save it. Most of the difference between an agent that works and one that flails is decided here, in ordinary function design.</p>
+    <ul class="toc">
+      <li><a href="#reader">1 A new reader</a></li>
+      <li><a href="#norm">2 Counting fairly</a></li>
+      <li><a href="#returns">3 Return values</a></li>
+      <li><a href="#inputs">4 Inputs</a></li>
+      <li><a href="#errors">5 Errors</a></li>
+      <li><a href="#set">6 The tool set</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Design a tool's return value for a reader that pays for every token.</li>
+      <li>Explain why raw frequencies mislead and how to normalise them.</li>
+      <li>Write error messages that let an agent recover by itself.</li>
+      <li>Decide how many tools to offer and how to keep them distinct.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> The tool's. It did exactly what it was asked and flooded the context with thousands of lines, or cut them off without saying so. The model cannot know in advance that <i>the</i> is the most common word in English. A tool that can return an unbounded amount of text, or truncate silently, is a design fault.</div>
+
+  <h2 id="reader">1. Tools have a new kind of reader</h2>
+  <p>You have designed functions for programs, which want complete, exact data, and interfaces for people, who want something readable. A model is a third kind of consumer. It reads like a person, pays for every token it reads, re-reads everything at every later step (Lesson 19), and acts on what it reads without being able to ask you what you meant.</p>
+  <p>So the question for every tool is the one from Lesson 5, turned around: <b>if a capable assistant received this return value with no other explanation, could they take the right next step?</b></p>
+
+  <h2 id="norm">2. A lesson from corpus linguistics: count fairly</h2>
+  <p>Suppose a word occurs 9 times in the news texts and 5 times in the academic texts. Is it more typical of news? You cannot say until you know how much text each contains. If the news section is twice the size, 9 against 5 is no difference at all.</p>
+  <p>Corpus linguists therefore never compare raw counts across corpora of different sizes. They report <b>normalised frequency</b>: occurrences per fixed amount of text, conventionally <b>per million words</b>. It is the first thing a student of the field learns, and exactly the kind of thing an agent will get wrong if its tool hands it raw counts.</p>
+
+  <div class="try" id="nf">
+    <span class="label">Try it · 1</span>
+    <h3>Raw against normalised</h3>
+    <label class="field"><span>Word</span><input id="nf-w" type="text" value="run"></label>
+    <div class="row" id="nf-presets"></div>
+    <div class="small">Raw count</div><div class="bars" id="nf-raw"></div>
+    <div class="small">Per 100 words (this corpus is tiny; real ones use per million)</div><div class="bars" id="nf-norm"></div>
+    <div class="out" id="nf-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice:</b> the three genres are deliberately unequal in size. For some words the ranking changes between the two charts. A tool that returned only the top chart would lead any reader, human or model, to the wrong conclusion. The fix belongs in the tool, not in a prompt telling the agent to be careful.</p>
+  </div>
+
+  <h2 id="returns">3. Design the return value</h2>
+  <p>Five properties of a good return value:</p>
+  <ul>
+    <li><b>Bounded.</b> Never return an unlimited amount. Cap it, and make the cap a parameter with a sensible default.</li>
+    <li><b>Honest about what is missing.</b> "Showing 8 of 3,412" tells the agent the sample is partial and that narrowing the request is possible. Silent truncation makes it reason from a fragment as if it were the whole.</li>
+    <li><b>Already digested.</b> Do the arithmetic in code: totals, rates, rankings. Models are unreliable at counting lines and dividing.</li>
+    <li><b>Citable.</b> Give every item a short stable ID, so the final answer can point to its evidence and your code can check it (Lesson 17).</li>
+    <li><b>Plain.</b> Short labelled text or compact JSON. No decoration, no fields the agent will never use.</li>
+  </ul>
+
+  <div class="try" id="rd">
+    <span class="label">Try it · 2</span>
+    <h3>Shape a tool's output</h3>
+    <p class="small">The agent called <code>concordance("run")</code>. Choose what the tool sends back, and see the result and its cost. The output is produced live from the mini-corpus.</p>
+    <div class="row" id="rd-toggles"></div>
+    <pre class="live" id="rd-out" style="max-height:260px;overflow:auto"></pre>
+    <div class="out" id="rd-notes" aria-live="polite"></div>
+  </div>
+
+  <h2 id="inputs">4. Design the inputs</h2>
+  <ul>
+    <li><b>Names say what, descriptions say when.</b> From Lesson 4: the model chooses tools by reading them. "Use this to see how a word is used in context; use <code>frequency</code> first if you only need counts."</li>
+    <li><b>Closed sets are enums.</b> A <code>genre</code> parameter that accepts any string will receive "journalism", "News" and "newspaper". List the legal values in the schema.</li>
+    <li><b>Do the obvious thing by default.</b> Searching for <i>run</i> should find <i>ran</i> and <i>running</i> unless the caller asks for the exact form. In corpus terms, search by <b>lemma</b> by default. Otherwise the agent must guess the inflections, and it will miss some.</li>
+    <li><b>Few parameters, each explained.</b> Every optional parameter is a decision the model must make on every call.</li>
+  </ul>
+
+  <h2 id="errors">5. Errors are messages to the agent</h2>
+  <p>When a tool fails, the result still goes into the context and the model still reads it. A stack trace teaches it nothing. An error written as advice lets the agent correct course on the next step, which is what the retry-with-feedback pattern of Lesson 8 depends on.</p>
+  <div class="try">
+    <span class="label">Try it · 3</span>
+    <h3>Which return is most useful?</h3>
+    <div id="er-box"></div>
+  </div>
+
+  <h2 id="set">6. The set of tools</h2>
+  <p><b>Fewer, distinct tools beat many overlapping ones.</b> If two tools could plausibly answer the same need, the model will sometimes choose the wrong one, and you will spend your prompt explaining the difference. Merge them, or make the boundary obvious in their names.</p>
+  <p><b>Pick the right level.</b> Too low, such as "run this regular expression over a file", and the agent must rebuild corpus linguistics from parts, slowly and with mistakes. Too high, such as "analyse this word", and you have hidden the whole task inside one opaque call that the agent cannot steer. Aim for the operations a human expert thinks in: <i>concordance</i>, <i>frequency</i>, <i>collocates</i>, <i>define</i>.</p>
+  <p><b>Collocates</b> deserves a note, since you will build it. The standard measure of how strongly two words attract each other is <b>pointwise mutual information</b>: how much more often they occur together than they would if they were independent. You met it in Lesson 2's vector builder. It has a known flaw: it gives extreme scores to pairs that occurred together once or twice by accident. Corpus tools apply a minimum count before ranking, and so must yours. A tool that returns statistical noise at the top of its list is worse than no tool.</p>
+  <p>Finally, <b>watch the agent use them</b>. Read traces. Where it calls a tool with wrong arguments, calls two tools in sequence every time, or ignores a result, the tools are telling you how they should be redesigned.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: four well-made tools</h2>
+  <p><b>Time:</b> 2 hours. Rebuild Lesson 19's tools properly and add two more. <code>nltk.download("wordnet")</code> for the dictionary.</p>
+<pre><code>import math
+from collections import Counter
+from functools import lru_cache
+from nltk.corpus import wordnet
+from nltk.stem import WordNetLemmatizer
+
+lemmatize = lru_cache(maxsize=None)(WordNetLemmatizer().lemmatize)   # cached: it is called a lot
+
+def forms_match(token, word):
+    t = token.lower()
+    return t == word or lemmatize(t, "v") == word or lemmatize(t, "n") == word
+
+# Index every sentence once, with a stable ID such as "news:00412".
+INDEX = [(f"{g}:{i:05d}", g, sent) for g in GENRES
+         for i, sent in enumerate(brown.sents(categories=g))]
+
+def concordance(word, genre=None, limit=8):
+    word = word.lower()
+    if genre is not None and genre not in GENRES:
+        return {"error": f"Unknown genre {genre!r}. Valid genres: {', '.join(GENRES)}."}
+    hits = [(sid, " ".join(s)) for sid, g, s in INDEX
+            if (genre is None or g == genre) and any(forms_match(t, word) for t in s)]
+    if not hits:
+        return {"total": 0, "note": f"No occurrences of {word!r}"
+                + (f" in {genre}" if genre else "") + ". Check the spelling, or try another genre."}
+    return {"total": len(hits), "showing": min(limit, len(hits)),
+            "note": "Sample only; narrow by genre or raise limit to see more." if len(hits) > limit else "",
+            "lines": [{"id": sid, "text": text} for sid, text in hits[:limit]]}
+
+def collocates(word, genre=None, window=3, min_count=3, top=10):
+    """Words that occur near `word` more often than chance, ranked by PMI."""
+    word = word.lower()
+    near, total, n = Counter(), Counter(), 0
+    for sid, g, s in INDEX:
+        if genre is not None and g != genre:
+            continue
+        toks = [t.lower() for t in s if t.isalpha()]
+        total.update(toks); n += len(toks)
+        for i, t in enumerate(toks):
+            if forms_match(t, word):
+                near.update(toks[max(0, i - window):i] + toks[i + 1:i + 1 + window])
+    hits = sum(near.values())
+    scored = [(math.log2((c / hits) / (total[w] / n)), w, c)
+              for w, c in near.items() if c >= min_count]
+    return {"word": word, "window": window, "min_count": min_count,
+            "collocates": [{"word": w, "together": c, "pmi": round(p, 1)}
+                           for p, w, c in sorted(scored, reverse=True)[:top]]}
+
+def define(word):
+    senses = wordnet.synsets(word)
+    if not senses:
+        return {"error": f"{word!r} is not in the dictionary. Try its base form."}
+    return {"word": word, "senses": [{"pos": s.pos(), "gloss": s.definition()} for s in senses[:8]]}</code></pre>
+  <ol>
+    <li>Write <code>frequency(word)</code> to the same standard: lemma matching, per-million rates, genre sizes included. Then write descriptions for all four tools that say when to use each.</li>
+    <li>Rerun Lesson 19's questions. Compare steps and total tokens with the old tools.</li>
+    <li>Ask about <i>the</i> again. What does the agent see now, and what does it do next?</li>
+    <li>Call <code>collocates("run", min_count=1)</code> and then with <code>min_count=5</code>. Which list would you trust? Which would mislead an agent?</li>
+    <li>Pass a bad genre on purpose by asking about "newspapers". Does the agent recover in one step using the error text?</li>
+    <li>Read five traces from start to finish. Write down one change to a tool that the agent's behaviour suggests, and make it.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l20-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l20-r1"><label for="r1"><b>Required.</b> Church &amp; Hanks (1990), <a href="https://aclanthology.org/J90-1003/">Word Association Norms, Mutual Information, and Lexicography</a>. Read sections 1 to 3. The paper that brought mutual information to collocation, with examples a lexicographer would use.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l20-r2"><label for="r2"><b>Required.</b> The NLTK book, <a href="https://www.nltk.org/book/">chapter 2</a>: the sections on conditional frequency distributions and on WordNet. These are the data structures behind your tools.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l20-r3"><label for="r3"><b>Optional.</b> Anthropic's engineering article "Writing effective tools for agents", for a practitioner's account of the principles in this lesson.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 21:</b> an agent is on step 30. The result of its first tool call is still in the context, tens of thousands of tokens back. Is that a good use of the window? What would you keep instead?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w10-l19-loop.html">← Lesson 19</a> · <a href="../index.html">Course map</a> · <a href="w11-l21-memory.html">Lesson 21 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/minicorpus.js"></script>
+<script src="../assets/js/lesson20.js"></script>
+</body>
+</html>
