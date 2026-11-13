@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 26: Monitoring quality drift</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 6 · Week 13 · Lesson 26 · about 75 minutes</div>
+    <h1>Monitoring quality drift</h1>
+    <p class="lede">A system can get worse without anyone touching it. The model behind an API changes, users start asking different things, the data ages. No single trace shows it. Only numbers watched over time do, and choosing those numbers is the craft of this lesson.</p>
+    <ul class="toc">
+      <li><a href="#why">1 Why it drifts</a></li>
+      <li><a href="#lang">2 Language moves</a></li>
+      <li><a href="#what">3 What to watch</a></li>
+      <li><a href="#pct">4 Percentiles</a></li>
+      <li><a href="#detect">5 Detecting a shift</a></li>
+      <li><a href="#alerts">6 Alerts</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>List the ways an AI system's quality changes with no change to its code.</li>
+      <li>Choose operational signals and quality signals that can be computed from traces.</li>
+      <li>Explain why percentiles, not averages, describe latency and cost.</li>
+      <li>Set a drift alert and reason about its delay and its false alarms.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> Both are true when the change is in the <i>proportions</i>. Suppose one answer in twenty used to be poor and now it is one in eight. Any trace you open is still most likely a good one, in either month. A decline like that is invisible run by run and obvious in a rate plotted over time. You would have noticed it if you had been computing that rate every day.</div>
+
+  <h2 id="why">1. Four ways to get worse while standing still</h2>
+  <table>
+    <tr><th>What changed</th><th>Example</th></tr>
+    <tr><td><b>The model</b></td><td>A provider updates the model behind a name, or retires the version you tuned for. Your prompts meet a different reader.</td></tr>
+    <tr><td><b>The inputs</b></td><td>Users arrive with a new kind of question, a new language, longer documents. The system was never evaluated on these.</td></tr>
+    <tr><td><b>The data</b></td><td>The corpus is extended or re-indexed; documents go out of date; a tool's upstream source changes its format.</td></tr>
+    <tr><td><b>The world</b></td><td>New words and topics appear that neither model nor corpus has seen.</td></tr>
+  </table>
+  <p>Your eval set from Phase 3 guards against changes <i>you</i> make. It says nothing about changes that happen to you, and it is itself frozen at the moment you built it. Monitoring is evaluation that keeps running, on real traffic.</p>
+  <p>One defence belongs in configuration: request a specific, dated model version wherever the provider offers one, never a floating name that can be repointed. Then a model change becomes something you do deliberately, with the harness, instead of something you discover.</p>
+
+  <h2 id="lang">2. Language itself does not hold still</h2>
+  <p>Linguists distinguish two ways of studying a language. A <b>synchronic</b> description captures it at one moment. A <b>diachronic</b> study follows it through time. Every corpus, every eval set and every trained model is synchronic: a snapshot. The language keeps moving after the shutter closes.</p>
+  <ul>
+    <li><b>New words arrive.</b> The Brown corpus you have been using was compiled from texts printed in 1961. It contains no <i>email</i>, no <i>internet</i>, no <i>podcast</i>.</li>
+    <li><b>Old words shift.</b> <i>Tablet</i>, <i>stream</i>, <i>cloud</i>, <i>viral</i> and <i>tweet</i> have all gained meanings that a 1961 reader would not recognise. This is called <b>semantic change</b>.</li>
+    <li><b>Usage mixes.</b> Communities develop new habits of spelling, borrowing and switching between languages, faster in informal writing than anywhere else.</li>
+  </ul>
+  <p>For your agent this is concrete. Asked today about <i>stream</i>, it will report, correctly for its corpus, a word about water. A user will find that odd. The system did not break. The distance between its snapshot and the present grew. So among the things worth monitoring is a linguistic one: how much of what users ask about is missing from, or different in, your data.</p>
+
+  <h2 id="what">3. What to watch</h2>
+  <p>Everything here can be computed from the traces you began recording in Lesson 25.</p>
+  <table>
+    <tr><th>Kind</th><th>Signals</th><th>Tells you</th></tr>
+    <tr><td><b>Operational</b></td><td>requests, error rate, latency, tokens and cost per request</td><td>whether the service is up, fast and affordable</td></tr>
+    <tr><td><b>Behavioural</b></td><td>steps per run, tool error rate, loop warnings, compactions, runs ended by a limit</td><td>whether the agent is working harder for the same result</td></tr>
+    <tr><td><b>Quality proxies</b></td><td>verifier failure rate, retries, abstention rate, "not found" rate, user ratings, how often users rephrase and ask again</td><td>quality, indirectly, on every request, for free</td></tr>
+    <tr><td><b>Judged quality</b></td><td>a validated judge (Lesson 11) scoring a random sample of real traffic each day or week</td><td>quality, more directly, on a sample, at a cost</td></tr>
+    <tr><td><b>Inputs</b></td><td>language mix, question length, share of words absent from the corpus</td><td>whether users have moved away from what you tested</td></tr>
+  </table>
+  <p>The proxies are the workhorses. None of them <i>is</i> quality, and each can be gamed or can move for innocent reasons. But they are cheap, they cover every request, and a jump in one is a reason to read traces. And keep a human in the measurement: hand-check a small sample of the judge's verdicts regularly, because the judge is a model too, and its standards can drift along with everything else.</p>
+
+  <h2 id="pct">4. Averages lie about latency</h2>
+  <p>Most requests are quick and a few are very slow, a shape statisticians call a long tail. In such a distribution the mean describes nobody's experience. So operations people report <b>percentiles</b>: the <b>p50</b> (median) is the time half of requests beat; the <b>p95</b> is the time 95% of requests beat, and one request in twenty is slower than it. Agents make the tail worse than usual, since one run takes four steps and another forty.</p>
+
+  <div class="try" id="pc">
+    <span class="label">Try it · 1</span>
+    <h3>Grow a tail</h3>
+    <p class="small">1,000 simulated requests. Most take about two seconds. Some fraction get stuck.</p>
+    <div class="row"><label for="pc-f" class="small" style="min-width:190px">Requests that get stuck <b id="pc-fv">5%</b></label><input id="pc-f" type="range" min="0" max="25" step="1" value="5"></div>
+    <div class="row"><label for="pc-m" class="small" style="min-width:190px">How much slower they are <b id="pc-mv">10×</b></label><input id="pc-m" type="range" min="2" max="30" step="1" value="10"></div>
+    <svg id="pc-svg" viewBox="0 0 320 130" role="img" aria-label="Histogram of request latency" style="width:100%;max-width:460px;display:block;margin:6px auto"></svg>
+    <div class="out" id="pc-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Set stuck requests to 4%: the median and the p95 barely move while the mean climbs. Now 6%: the p95 jumps. Why does it react so sharply around 5%? And which number would a user who hit a slow request recognise?</p>
+  </div>
+
+  <h2 id="detect">5. Noticing a shift in a noisy number</h2>
+  <p>A daily rate bounces around. The task is to tell a real change from an ordinary bounce, quickly, without crying wolf. The standard approach: establish what normal looks like over a baseline period, smooth the daily values with a <b>rolling average</b> over several days, and alert when the smoothed value crosses a <b>threshold</b> set some distance above normal.</p>
+  <p>Two settings, pulling against each other, in a trade you have met twice before as precision against recall:</p>
+  <ul>
+    <li>A <b>longer window</b> and a <b>higher threshold</b> give fewer false alarms and slower detection.</li>
+    <li>A <b>shorter window</b> and a <b>lower threshold</b> give faster detection and more false alarms.</li>
+  </ul>
+
+  <div class="try" id="dr">
+    <span class="label">Try it · 2</span>
+    <h3>Tune a drift alert</h3>
+    <p class="small">Sixty days of a quality proxy, the share of reports failing verification. Normal is about 4%. On day 30 something changes upstream.</p>
+    <div class="row"><label for="dr-s" class="small" style="min-width:190px">Size of the real shift <b id="dr-sv">+3.0</b> pts</label><input id="dr-s" type="range" min="0" max="6" step="0.5" value="3"></div>
+    <div class="row"><label for="dr-w" class="small" style="min-width:190px">Rolling window <b id="dr-wv">7</b> days</label><input id="dr-w" type="range" min="1" max="14" step="1" value="7"></div>
+    <div class="row"><label for="dr-t" class="small" style="min-width:190px">Alert threshold <b id="dr-tv">5.5</b>%</label><input id="dr-t" type="range" min="4.2" max="9" step="0.1" value="5.5"></div>
+    <div class="row"><button id="dr-new" type="button">Different random noise</button></div>
+    <svg id="dr-svg" viewBox="0 0 320 170" role="img" aria-label="Daily failure rate with rolling average and alert threshold" style="width:100%;max-width:460px;display:block;margin:6px auto"></svg>
+    <div class="out" id="dr-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Set the window to 1 day and the threshold to 5%: how many false alarms before day 30? Now find settings that catch a 3-point shift within a week with none. Then set the shift to 1 point: can any setting catch it reliably? Small drifts need more data, which means more days, to detect at all. Press the noise button a few times before trusting a setting.</p>
+  </div>
+
+  <h2 id="alerts">6. Alerts people act on</h2>
+  <ul>
+    <li><b>Few.</b> An alert that fires weekly and is usually nothing teaches everyone to ignore alerts. Page a person only for what needs a person now; put the rest on a dashboard reviewed on a schedule.</li>
+    <li><b>Specific.</b> "Verifier failure rate 9% over 7 days, normal 4%" with a link to failing traces, not "quality degraded".</li>
+    <li><b>With a next step.</b> A short written procedure: check whether the model version changed, check the language mix, read ten failing traces, run the harness.</li>
+    <li><b>Closing the loop.</b> Every investigated alert ends with new cases in the eval set (Lesson 12), so the same decline is caught before release next time.</li>
+  </ul>
+  <div class="try">
+    <span class="label">Try it · 3</span>
+    <h3>Which signal would show it first?</h3>
+    <div id="sg-box"></div>
+  </div>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: a dashboard from your traces</h2>
+  <p><b>Time:</b> 2 hours. Everything is computed from the span file written in Lesson 25.</p>
+<pre><code>import json, statistics
+from collections import defaultdict
+from datetime import datetime
+
+def load_requests(path="traces/spans.jsonl"):
+    spans = [json.loads(l) for l in open(path, encoding="utf-8")]
+    by_trace = defaultdict(list)
+    for s in spans:
+        by_trace[s["trace"]].append(s)
+    rows = []
+    for trace_id, ss in by_trace.items():
+        root = next(s for s in ss if s["parent"] is None)
+        rows.append({
+            "trace": trace_id,
+            "day": datetime.fromtimestamp(root["start"]).date().isoformat(),
+            "seconds": root["end"] - root["start"],
+            "tokens": sum(s["attrs"].get("input_tokens", 0) + s["attrs"].get("output_tokens", 0) for s in ss),
+            "steps": sum(s["kind"] == "model" for s in ss),
+            "tool_errors": sum(s["kind"] == "tool" and "error" in s for s in ss),
+            "verified": str(root["attrs"].get("verified")) == "True",
+            "not_found": "No occurrences" in json.dumps(ss),    # the note your tools return (Lesson 20)
+        })
+    return rows
+
+def percentile(values, p):
+    values = sorted(values)
+    return values[min(len(values) - 1, int(p / 100 * len(values)))]
+
+def daily(rows):
+    days = defaultdict(list)
+    for r in rows:
+        days[r["day"]].append(r)
+    for day in sorted(days):
+        rs = days[day]
+        print(day, f"n={len(rs):3}",
+              f"p50={percentile([r['seconds'] for r in rs], 50):5.1f}s",
+              f"p95={percentile([r['seconds'] for r in rs], 95):5.1f}s",
+              f"tokens/req={statistics.mean(r['tokens'] for r in rs):7.0f}",
+              f"verify_fail={1 - statistics.mean(r['verified'] for r in rs):.2f}",
+              f"not_found={statistics.mean(r['not_found'] for r in rs):.2f}")
+
+def alert(series, window=7, threshold=0.055):
+    """series: list of daily rates. Returns the indexes of days on which the alert fires."""
+    return [i for i in range(window - 1, len(series))
+            if statistics.mean(series[i - window + 1:i + 1]) > threshold]</code></pre>
+  <ol>
+    <li>Make sure the root span records <code>verified</code>, the model ID and the prompt version. Run forty reports on ordinary words to establish a baseline. Print the daily table.</li>
+    <li><b>Simulate input drift.</b> Run twenty reports on words the 1961 corpus lacks or uses differently: <i>email</i>, <i>internet</i>, <i>online</i>, <i>stream</i>, <i>tablet</i>, <i>viral</i>, <i>cloud</i>. Which columns move? Which stay flat although quality has plainly fallen?</li>
+    <li>Add an input signal: the share of requested words with zero or very low corpus frequency. Does it catch the drift sooner than the output signals?</li>
+    <li><b>Simulate a model change.</b> Switch <code>MODEL</code> to a weaker model for twenty runs without telling your dashboard. Which signals show it?</li>
+    <li>Write an alert rule for one signal with a window and a threshold, and test it on your combined series. How many days of the bad period passed before it would have fired?</li>
+    <li>Sample ten reports from each period, shuffle them, and grade them blind against Lesson 24's rubric. Does your own judgement agree with what the proxies said?</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l26-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l26-r1"><label for="r1"><b>Required.</b> <i>Site Reliability Engineering</i> (the Google SRE book, free online), the chapter <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Monitoring Distributed Systems</a>: symptoms versus causes, the four golden signals, and why alerts should be few.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l26-r2"><label for="r2"><b>Required.</b> Shankar et al. (2024), <a href="https://arxiv.org/abs/2404.12272">Who Validates the Validators? Aligning LLM-Assisted Evaluation of LLM Outputs with Human Preferences</a>. Read the introduction and the discussion of criteria drift: how people's standards for judging outputs change as they see more of them.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l26-r3"><label for="r3"><b>Optional.</b> Hamilton, Leskovec &amp; Jurafsky (2016), <a href="https://arxiv.org/abs/1605.09096">Diachronic Word Embeddings Reveal Statistical Laws of Semantic Change</a>. Lesson 2's embeddings, trained decade by decade, used to watch word meanings move.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 27:</b> your monitoring shows that three requests in ten this week repeat a question already asked, word for word. What is the cheapest correct response to a question you have answered before? And what could make the cheap response wrong?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w13-l25-tracing.html">← Lesson 25</a> · <a href="../index.html">Course map</a> · <a href="w14-l27-cost.html">Lesson 27 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson26.js"></script>
+</body>
+</html>

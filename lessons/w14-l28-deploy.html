@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 28: Guardrails and deployment</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 6 · Week 14 · Lesson 28 · about 80 minutes</div>
+    <h1>Guardrails and deployment</h1>
+    <p class="lede">The last step turns a program you run into a service others call. Nothing about the model changes. Everything around it does: who sends the input, how long they will wait, what happens when it fails, and how you replace it with a better version without breaking what works.</p>
+    <ul class="toc">
+      <li><a href="#service">1 A service</a></li>
+      <li><a href="#guard">2 Guardrails</a></li>
+      <li><a href="#evade">3 Evasion</a></li>
+      <li><a href="#ambig">4 Ambiguity</a></li>
+      <li><a href="#fail">5 Failing well</a></li>
+      <li><a href="#rollout">6 Rolling out</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+      <li><a href="#project">Project</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Wrap a long-running agent in an API that survives slow runs and failures.</li>
+      <li>Place guardrails on inputs, outputs and actions, and know what each can and cannot stop.</li>
+      <li>Explain why keyword filters fail, in terms of how writing systems work.</li>
+      <li>Release a new version in stages, with a way back.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> The input is no longer yours: it may be long, malformed, hostile, or in a language you never tested. Many requests arrive at once. Callers wait at the other end of a network and give up, or retry, when a run takes minutes. Your API key is spent by people you have never met. Failures happen while you are asleep. And you can no longer fix things by editing a file and rerunning, because other people depend on the version that is live.</div>
+
+  <h2 id="service">1. From script to service</h2>
+  <p>An agent run takes tens of seconds to minutes. An ordinary web request is expected back in a second or two, and proxies along the way cut connections that stay silent for long. So the standard shape for slow work is a <b>job</b>:</p>
+  <div class="flow" aria-label="Submit a job, receive an ID, poll for status, fetch the result">
+    <div class="box">POST /reports<small>returns a job ID at once</small></div><span class="arr">→</span>
+    <div class="box">worker<small>runs the agent</small></div><span class="arr">→</span>
+    <div class="box">GET /reports/{id}<small>status, then result</small></div>
+  </div>
+  <p>The caller submits, gets an ID immediately, and asks for status until the job is done. The alternative, when a person is watching, is to hold the connection open and <b>stream</b> progress events as in Lesson 3. Either way, a few properties make the service sturdy:</p>
+  <ul>
+    <li><b>Timeouts everywhere.</b> On each model call, each tool call and the job as a whole. A call with no timeout will, one day, wait forever.</li>
+    <li><b>Bounded concurrency.</b> A fixed number of jobs at once, the rest queued. Your provider's rate limits and your own budget (Lesson 27) are both finite.</li>
+    <li><b>Idempotent submission.</b> Callers retry. If the same request arrives twice with the same client-supplied key, return the existing job; do not run and bill it twice.</li>
+    <li><b>Pinned configuration.</b> Model ID, prompt version and index version come from one versioned config file, are recorded in every trace (Lesson 25), and change only through a release.</li>
+    <li><b>Secrets outside the code.</b> Environment variables or a secret store. Never the repository, never a log.</li>
+  </ul>
+
+  <h2 id="guard">2. Three places for guardrails</h2>
+  <p>A <b>guardrail</b> is a check, outside the model, that stops or alters something before harm is done. They sit at three points:</p>
+  <table>
+    <tr><th>Where</th><th>Checks</th><th>You already have</th></tr>
+    <tr><td><b>Input</b></td><td>size and format limits, allowed languages, scope ("is this a question this service answers?"), policy filters</td><td>schema validation (Lesson 4)</td></tr>
+    <tr><td><b>Output</b></td><td>schema, citation and evidence verification, removal of personal data, policy filters</td><td>gates and verifiers (Lessons 8, 17, 23)</td></tr>
+    <tr><td><b>Action</b></td><td>allow-lists of tools and arguments, limits on what can be written or sent, human approval for anything irreversible</td><td>least privilege (Lesson 22)</td></tr>
+  </table>
+  <p>Two design rules. Prefer guardrails that are <b>code</b>: they are fast, free, and behave the same every time. Use a model as a guardrail only for what code cannot judge, and then treat it as a classifier with a measured error rate, like any judge (Lesson 11). And decide for each guardrail whether it <b>fails closed</b>, blocking the request when the check itself breaks, or <b>fails open</b>, letting it through. Safety checks should fail closed. Conveniences can fail open.</p>
+
+  <h2 id="evade">3. Why filters on text are so easy to slip past</h2>
+  <p>The simplest input guardrail is a list of forbidden words. Suppose your service must decline questions about salaries, a topic outside its remit. Block the string <i>salary</i> and you are done? Writing systems give an evader a great deal of room, because many different sequences of characters <i>look</i> or <i>read</i> the same to a person:</p>
+  <ul>
+    <li><b>Spacing and punctuation</b> inside the word.</li>
+    <li><b>Substituted characters</b>: digits for letters, or letters from another alphabet that look identical. Cyrillic <i>а</i> and Latin <i>a</i> are different characters with the same shape. Such pairs are called <b>homoglyphs</b>.</li>
+    <li><b>Invisible characters</b>: zero-width spaces and joiners that display as nothing.</li>
+    <li><b>Optional marks</b>: in Arabic, vowel marks and the stretching character can be sprinkled through a word without changing how it reads, as you saw in Lesson 15.</li>
+  </ul>
+
+  <div class="try" id="fl">
+    <span class="label">Try it · 1</span>
+    <h3>Slip past a filter</h3>
+    <p class="small">Two filters for the topic "salary" (English) and <span class="ar">راتب</span> (Arabic). One searches the raw text. The other normalises first.</p>
+    <label class="field"><span>Your input</span><input id="fl-in" type="text" dir="auto" value="What is her salary?"></label>
+    <div class="out" id="fl-out" aria-live="polite"></div>
+    <div class="small">The same two filters on a set of test inputs:</div>
+    <div style="overflow-x:auto"><table class="tight" id="fl-table"></table></div>
+    <p class="small" style="margin:0"><b>Read the last two rows.</b> A paraphrase contains none of the forbidden strings, so no amount of normalising helps: the topic is a meaning, and you are matching characters. And the more aggressively you normalise, the more innocent text you block. This is Lesson 15's trade again, and Lesson 13's vocabulary mismatch working for the attacker.</p>
+  </div>
+  <p>The practical position: normalise text before any check (it is cheap and removes the trivial tricks), use classifiers where meaning matters and measure them, and never let a text filter be the only thing between an input and a consequence. The durable protection is Lesson 22's: limit what the system is <i>able</i> to do.</p>
+
+  <h2 id="ambig">4. Most difficult inputs are not hostile, only unclear</h2>
+  <p>Far more requests go wrong through ambiguity than through attack. Linguists sort ambiguity into kinds, and each calls for a slightly different response:</p>
+  <ul>
+    <li><b>Lexical</b>: a word has several senses. <i>"How is 'light' used?"</i> The noun, the adjective, the verb?</li>
+    <li><b>Structural</b>: the words can be grouped in more than one way. <i>"Compare run and walk in news and fiction"</i>: two words in each of two genres, or <i>run</i> in news against <i>walk</i> in fiction?</li>
+    <li><b>Referential</b>: it is unclear what an expression points to. <i>"Do the same for the other one."</i></li>
+    <li><b>Scope of the request</b>: how much is wanted. <i>"Tell me about 'issue'."</i> A line, or a ten-page report costing a dollar?</li>
+  </ul>
+  <p>A service has three options: ask, guess silently, or <b>guess and say so</b>. For cheap, reversible requests the third is usually best: proceed on the most likely reading and state the assumption at the top of the answer, so that a wrong guess is visible and cheap to correct. Ask first when the readings differ greatly in cost or cannot be undone.</p>
+  <div class="try">
+    <span class="label">Try it · 2</span>
+    <h3>What kind of ambiguity, and what to do?</h3>
+    <div id="am-box"></div>
+  </div>
+
+  <h2 id="fail">5. Failing well</h2>
+  <p>Model providers return errors as a matter of course: rate limits, overloads, timeouts. Most are transient, so the standard response is to <b>retry with exponential backoff</b>: wait a little, then twice as long, then twice that. Add <b>jitter</b>, a random variation in each wait, so that a thousand clients that failed together do not all retry at the same instant and cause the next failure themselves.</p>
+
+  <div class="try" id="bo">
+    <span class="label">Try it · 3</span>
+    <h3>Plan the retries</h3>
+    <div class="row"><label for="bo-b" class="small" style="min-width:170px">First wait <b id="bo-bv">1.0</b> s</label><input id="bo-b" type="range" min="0.5" max="5" step="0.5" value="1"></div>
+    <div class="row"><label for="bo-f" class="small" style="min-width:170px">Multiplier <b id="bo-fv">2.0</b>×</label><input id="bo-f" type="range" min="1" max="4" step="0.5" value="2"></div>
+    <div class="row"><label for="bo-n" class="small" style="min-width:170px">Retries <b id="bo-nv">5</b></label><input id="bo-n" type="range" min="1" max="8" step="1" value="5"></div>
+    <div class="bars" id="bo-bars"></div>
+    <div class="out" id="bo-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Set the multiplier to 1: fixed waits. How long does a caller wait in total with the multiplier at 2 and eight retries? Is that acceptable for someone watching a screen? For an overnight batch? The cap of 60 seconds per wait keeps the schedule from running away.</p>
+  </div>
+  <p>Retry only what is safe to repeat, and only errors that are transient: a malformed request will fail identically every time. Cap the attempts. When retries are exhausted, fail clearly, keep the trace, and tell the caller something true: what happened, whether trying again later might help, and the trace ID.</p>
+
+  <h2 id="rollout">6. Rolling out a change</h2>
+  <p>Lesson 12 gave you a gate before release. Production needs caution after it too, because your eval set is a sample and real traffic always contains something it lacks.</p>
+  <ol>
+    <li><b>Offline gate.</b> The harness passes: no regression on the development set, test set checked.</li>
+    <li><b>Shadow.</b> The new version runs on a copy of live requests. Its answers are recorded and compared with the current version's, and never shown to users. Free of risk, and it meets real inputs.</li>
+    <li><b>Canary.</b> A small share of real traffic, say five percent, is served by the new version, while Lesson 26's signals are watched for both groups side by side.</li>
+    <li><b>Full release</b>, with the previous version kept ready.</li>
+    <li><b>Rollback</b> on any alarm: one configuration change, practised in advance, that restores the last version.</li>
+  </ol>
+  <p>Because model ID, prompt and index are pinned in one config (section 1), a "version" is a single file, and rolling back is replacing it. And when something does go wrong in production, the loop you have been building since Phase 3 closes: find the trace, reproduce it, add it to the eval set, fix, pass the gate, release in stages.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: put the agent behind an API</h2>
+  <p><b>Time:</b> 3 hours. <code>pip install fastapi uvicorn</code>.</p>
+<pre><code># service.py     run with: uvicorn service:app
+import json, re, unicodedata, uuid, asyncio
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+CONFIG = json.load(open("config/release.json"))     # model, prompt_version, index_version, limits
+app = FastAPI()
+JOBS = {}                                            # job id → {"status", "result", "trace"}
+SLOTS = asyncio.Semaphore(CONFIG["max_concurrent_jobs"])
+
+class ReportRequest(BaseModel):
+    word: str
+    idempotency_key: str | None = None
+
+ZERO_WIDTH = re.compile(r"[​-‍⁠﻿]")
+
+def clean_word(raw):
+    """Input guardrail. Returns the normalised word, or raises with a reason."""
+    w = ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", raw)).strip().lower()
+    if not 1 &lt;= len(w) &lt;= 40:
+        raise ValueError("The word must be between 1 and 40 characters.")
+    if not re.fullmatch(r"[a-z][a-z'-]*", w):
+        raise ValueError("This service covers single English words written in Latin letters.")
+    return w
+
+async def run_job(job_id, word):
+    async with SLOTS:                                # at most N agent runs at once
+        JOBS[job_id]["status"] = "running"
+        try:
+            report, trace_id = await asyncio.wait_for(
+                asyncio.to_thread(research_word, word, CONFIG),      # your agent, with tracing
+                timeout=CONFIG["job_timeout_seconds"])
+            JOBS[job_id].update(status="done", result=report, trace=trace_id)
+        except asyncio.TimeoutError:
+            JOBS[job_id].update(status="failed", result="The run exceeded its time limit.")
+        except Exception as e:
+            JOBS[job_id].update(status="failed", result=f"The run failed: {type(e).__name__}.")
+
+@app.post("/reports", status_code=202)
+async def submit(req: ReportRequest):
+    try:
+        word = clean_word(req.word)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    job_id = req.idempotency_key or uuid.uuid4().hex[:12]
+    if job_id not in JOBS:                           # a retried submission returns the same job
+        JOBS[job_id] = {"status": "queued", "result": None, "trace": None}
+        asyncio.create_task(run_job(job_id, word))
+    return {"job": job_id, "status": JOBS[job_id]["status"]}
+
+@app.get("/reports/{job_id}")
+async def status(job_id: str):
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail="No such job.")
+    return JOBS[job_id]
+
+@app.get("/health")
+async def health():
+    return {"ok": True, "release": CONFIG["release"], "model": CONFIG["model"]}</code></pre>
+  <ol>
+    <li>Write <code>config/release.json</code> and <code>research_word(word, config)</code>, which runs the full agent from Lesson 23 with tracing, caches and budgets, and returns the verified report and its trace ID.</li>
+    <li>Start the service. Submit a word, poll until done, and fetch the report. Then use the trace ID to display the run with <code>show_trace</code>.</li>
+    <li>Submit the same request twice with one idempotency key. Confirm from the traces that the agent ran once.</li>
+    <li>Attack your own input guardrail: an empty string, a ten-thousand-character string, a word with a zero-width space inside, a word in Cyrillic look-alikes, a whole instruction sentence. What gets through that should not, and what is refused that should not be?</li>
+    <li>Submit ten words at once. Check that no more than your configured number run concurrently, and that none is lost.</li>
+    <li>Add retry with backoff and jitter around the model call, for rate-limit and overload errors only. Simulate three failures in a row and watch the waits in the trace.</li>
+    <li><b>Shadow a new release.</b> Create a second config with a different prompt version or model. For each request, also run the shadow config in the background, store both reports, and after twenty requests compare them with Lesson 24's metrics. Would you promote it?</li>
+    <li>Point Lesson 24's eval at the service's HTTP endpoint instead of the Python function. The same twenty tasks should pass.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l28-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l28-r1"><label for="r1"><b>Required.</b> The <a href="https://fastapi.tiangolo.com/tutorial/">FastAPI tutorial</a>: first steps, request bodies, handling errors, and background tasks. Enough to understand every line of the lab's service.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l28-r2"><label for="r2"><b>Required.</b> The <a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/">OWASP Top 10 for Large Language Model Applications</a>. For each item, write one line: does it apply to your service, and what stands in its way?</label></li>
+    <li><input type="checkbox" id="r3" data-save="l28-r3"><label for="r3"><b>Optional.</b> Unicode Technical Standard #39, <a href="https://www.unicode.org/reports/tr39/">Unicode Security Mechanisms</a>: the sections on confusable characters and mixed-script detection, the formal treatment of section 3's homoglyphs.</label></li>
+  </ul>
+
+  <h2 id="project">Phase 6 project: run the agent as a service</h2>
+  <p><b>The corpus research agent, deployed: other people can call it, you can see what it does, you know what it costs, and you can change it safely.</b></p>
+  <div class="card">
+    <h3>What to build</h3>
+    <ol>
+      <li>The API from this lab: job submission, status, health, idempotency, bounded concurrency, timeouts.</li>
+      <li>Tracing on every span, with redaction, and a command to display any trace by ID.</li>
+      <li>A daily metrics table from the traces: volume, p50 and p95 latency, tokens and cost per request, verifier failure rate, one input-drift signal, and one alert rule.</li>
+      <li>Tool-result and response caches keyed by versions; a cascade behind the verifier; per-request and daily budgets with a degraded mode.</li>
+      <li>Input and output guardrails, and retries with backoff.</li>
+      <li>One pinned release config, and a shadow-run comparison of a second.</li>
+      <li>It may run on your own machine. If you put it on a public address, add an access key and the per-user limits first.</li>
+    </ol>
+    <h3>What to hand in</h3>
+    <ul class="check">
+      <li><input type="checkbox" id="p1" data-save="p6-a"><label for="p1">The repository, with a README: how to start the service, submit a job, read a trace and print the metrics.</label></li>
+      <li><input type="checkbox" id="p2" data-save="p6-b"><label for="p2">Cost before and after: tokens and cost per report, p50 and p95, alongside the unchanged eval scores.</label></li>
+      <li><input type="checkbox" id="p3" data-save="p6-c"><label for="p3">One diagnosed incident: a real or induced failure, the trace that explained it, the eval case you added, and the fix.</label></li>
+      <li><input type="checkbox" id="p4" data-save="p6-d"><label for="p4">Your drift experiment from Lesson 26: which signals moved, which did not, and how long your alert took.</label></li>
+      <li><input type="checkbox" id="p5" data-save="p6-e"><label for="p5">The shadow comparison, with your decision to promote or not and the reason.</label></li>
+      <li><input type="checkbox" id="p6" data-save="p6-f"><label for="p6">One page: the three things most likely to go wrong with this service in its first month, and how you would find out.</label></li>
+    </ul>
+    <p class="small" style="margin:0">Send me the link and the page. One phase remains, and it asks a different question: when should you stop working around the model and change the model itself?</p>
+  </div>
+
+  <div class="note"><b>Bring to Lesson 29:</b> after all the prompting, retrieval and tooling, suppose one task still fails too often: adding the vowel marks to unvowelled Arabic text. What would have to be true for changing the model itself to be the right next move?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w14-l27-cost.html">← Lesson 27</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson28.js"></script>
+</body>
+</html>

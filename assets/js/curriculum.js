@@ -117,16 +117,16 @@ window.COURSE = {
       weeks: [
         { n: 13, title: "Seeing inside", ling: "Error analysis as linguistic analysis",
           lessons: [
-            { id: "l25", title: "Tracing and logging" },
-            { id: "l26", title: "Monitoring quality drift" }
+            { id: "l25", title: "Tracing and logging", href: "lessons/w13-l25-tracing.html", mins: 70 },
+            { id: "l26", title: "Monitoring quality drift", href: "lessons/w13-l26-monitoring.html", mins: 75 }
           ],
-          reading: "A practitioner write-up on LLM observability" },
+          reading: "OpenTelemetry on traces; the Google SRE book on monitoring; Shankar et al. (2024)" },
         { n: 14, title: "Cost and safety", ling: "Ambiguity and adversarial input",
           lessons: [
-            { id: "l27", title: "Caching, model routing, cost control" },
-            { id: "l28", title: "Guardrails and deployment" }
+            { id: "l27", title: "Caching, model routing, cost control", href: "lessons/w14-l27-cost.html", mins: 75 },
+            { id: "l28", title: "Guardrails and deployment", href: "lessons/w14-l28-deploy.html", mins: 80 }
           ],
-          reading: "A practitioner write-up on prompt injection defences", milestone: "Deploy the agent" }
+          reading: "Chen et al. (2023), FrugalGPT; the OWASP Top 10 for LLM applications", milestone: "Deploy the agent" }
       ]
     },
     {

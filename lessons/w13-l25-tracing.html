@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 25: Tracing and logging</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 6 · Week 13 · Lesson 25 · about 70 minutes</div>
+    <h1>Tracing and logging</h1>
+    <p class="lede">So far your agent has run when you ran it, while you watched. In production it runs for other people, at other times, and you find out about problems afterwards. This phase is about operating the system: seeing what it did, noticing when it gets worse, paying less for it, and exposing it safely.</p>
+    <ul class="toc">
+      <li><a href="#need">1 What to record</a></li>
+      <li><a href="#spans">2 Traces and spans</a></li>
+      <li><a href="#read">3 Reading a trace</a></li>
+      <li><a href="#coding">4 Error analysis</a></li>
+      <li><a href="#privacy">5 Privacy</a></li>
+      <li><a href="#habits">6 Habits</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Say what must be recorded for an AI system's behaviour to be explainable later.</li>
+      <li>Structure a run as a trace of nested spans and read it as a waterfall.</li>
+      <li>Turn a pile of failures into a taxonomy by open coding.</li>
+      <li>Keep personal data out of your logs.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> To explain yesterday's strange answer you need, from that moment: the user's exact input; every request sent to the model and every response; every tool call with its arguments and result; which versions of the prompt, the model and the corpus index were in use; how long each step took and what it cost; and any error. You also need a way to find that one run among thousands. Record less and you are guessing.</div>
+
+  <h2 id="need">1. Why AI systems need more recording than ordinary software</h2>
+  <p>A conventional bug can usually be reproduced: give the same input, get the same wrong output, step through the code. A model-driven system often cannot be replayed. The model samples (Lesson 3), an agent takes a different path each run (Lesson 24), the provider may have updated the model, and the data may have changed. If you did not capture what happened, it is gone.</p>
+  <p>There is a second reason. In ordinary software the logic is in the code, which you can read. In an agent, much of the logic is in the model's choices, and those exist only in the record of a run. <b>The trace is the source code of what actually happened.</b></p>
+
+  <h2 id="spans">2. Traces and spans</h2>
+  <p>Three kinds of recording, each answering a different question:</p>
+  <ul>
+    <li><b>Logs</b>: timestamped messages. <i>What events occurred?</i></li>
+    <li><b>Metrics</b>: numbers aggregated over time. <i>How is the system doing overall?</i> (Lesson 26.)</li>
+    <li><b>Traces</b>: the structured story of one request. <i>What happened in this run, in what order, and where did the time go?</i></li>
+  </ul>
+  <p>A trace is a tree of <b>spans</b>. A span is one unit of work: it has a name, a start time, an end time, a parent, and attributes. The whole request is the root span; each model call and each tool call is a child. Every span carries the same <b>trace ID</b>, which is how you pull one run out of a million. This vocabulary comes from the tracing of distributed systems and is standardised by the OpenTelemetry project, so the tools and habits you learn transfer.</p>
+  <table>
+    <tr><th>Span kind</th><th>Attributes worth recording</th></tr>
+    <tr><td>Request (root)</td><td>trace ID, user or session ID, input, final output, outcome, total tokens and cost, versions of prompt, model, index</td></tr>
+    <tr><td>Model call</td><td>model ID, parameters, messages sent (or a reference to them), response, input and output tokens, finish reason</td></tr>
+    <tr><td>Tool call</td><td>tool name, arguments, size of result, the result or a reference to it, error if any</td></tr>
+    <tr><td>Retrieval</td><td>query, IDs and scores of what was returned</td></tr>
+    <tr><td>Gate / verifier</td><td>pass or fail, the list of problems, whether a retry followed</td></tr>
+  </table>
+
+  <h2 id="read">3. Reading a trace</h2>
+  <p>The standard picture of a trace is a <b>waterfall</b>: one bar per span, positioned by start time and sized by duration. It answers at a glance the first two questions about any run: what took the time, and what happened just before things went wrong.</p>
+
+  <div class="try" id="wf">
+    <span class="label">Try it · 1</span>
+    <h3>Find out what happened</h3>
+    <div class="row">
+      <label><input type="radio" name="wf" value="normal" checked> A normal run</label>
+      <label><input type="radio" name="wf" value="strange"> Yesterday's strange answer</label>
+    </div>
+    <p class="small" id="wf-case"></p>
+    <svg id="wf-svg" role="img" aria-label="Trace waterfall" style="width:100%;display:block"></svg>
+    <div class="row small" style="gap:14px"><span><span style="display:inline-block;width:10px;height:10px;background:var(--teal)"></span> model</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--accent)"></span> tool</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--c6)"></span> check</span><span><span style="display:inline-block;width:10px;height:10px;background:var(--bad)"></span> error</span></div>
+    <div class="out" id="wf-detail" aria-live="polite">Tap a bar to see its attributes.</div>
+    <div class="out" id="wf-sum"></div>
+    <p class="small" style="margin:0"><b>Diagnose the second run.</b> The report said the word does not occur in learned prose, which is false. The verifier passed it. Tap through the spans until you find where the falsehood entered. Which earlier lesson described exactly this fault, and where should the fix go?</p>
+  </div>
+
+  <h2 id="coding">4. From traces to understanding: open coding</h2>
+  <p>One trace explains one failure. To learn what is wrong with the <i>system</i> you need to read many, and reading many without a method produces only a vague unease. The method comes from qualitative research in the social sciences, where it is called <b>open coding</b>:</p>
+  <ol>
+    <li>Read a failure. Write a short free-text note on what went wrong, in your own words, without a fixed list of categories.</li>
+    <li>Do that for fifty or a hundred.</li>
+    <li>Group similar notes. Name the groups. These are your failure categories, and they came from the data.</li>
+    <li>Count. The biggest group is your next piece of work.</li>
+  </ol>
+  <p>This is Lesson 10's error analysis grown up. For a language system the categories are often linguistic, and knowing the levels of linguistic description gives you a head start on naming them:</p>
+  <div class="try">
+    <span class="label">Try it · 2</span>
+    <h3>Name the level</h3>
+    <div id="lv-box"></div>
+  </div>
+  <p>A taxonomy pays twice. It tells you what to fix, and each category becomes a tag on eval cases (Lesson 9), so that next month you can report "sense errors down from 14 to 3" instead of "it seems better".</p>
+
+  <h2 id="privacy">5. Traces contain what people typed</h2>
+  <p>The same completeness that makes a trace useful makes it sensitive. Users paste names, addresses, messages and documents into prompts, and tools fetch more. A trace store is a database of personal data unless you make it otherwise.</p>
+  <ul>
+    <li><b>Redact before storing.</b> Remove or mask obvious identifiers at the point of logging.</li>
+    <li><b>Limit retention.</b> Keep full content for days or weeks, aggregates for longer.</li>
+    <li><b>Limit access.</b> Fewer people should read raw traces than read dashboards.</li>
+    <li><b>Never log secrets.</b> API keys and tokens must not appear in any span.</li>
+  </ul>
+
+  <div class="try" id="red">
+    <span class="label">Try it · 3</span>
+    <h3>Redact a log line</h3>
+    <label class="field"><span>What the user typed</span><textarea id="rd-in" dir="auto" style="min-height:90px">Please check the report for Sara Hamad (sara.hamad@example.org, +966 50 123 4567). My key is sk-or-v1-9f8a7b6c5d4e3f2a and my colleague سارة الأحمد will review it.</textarea></label>
+    <div class="small">What gets stored</div>
+    <pre class="live" id="rd-out" dir="auto"></pre>
+    <div class="out" id="rd-note" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Notice what survives.</b> Patterns with a fixed shape, such as email addresses, phone numbers and keys, are easy. Names are not: no pattern separates a person's name from any other words, in English or in Arabic. Finding them is a tagging task, named entity recognition, the same kind of sequence labelling you did in Phase 2. Rules are a floor, not a guarantee.</p>
+  </div>
+
+  <h2 id="habits">6. Habits</h2>
+  <ul>
+    <li><b>One JSON object per line.</b> Structured records can be filtered, counted and joined; free-text log messages cannot.</li>
+    <li><b>Every record carries the trace ID.</b> And return that ID to the user with the answer, so that "it was strange" can become "trace 7f3a was strange".</li>
+    <li><b>Record versions.</b> Prompt version, model ID, index version. Without them you cannot tell a regression from bad luck.</li>
+    <li><b>Record failures as failures.</b> An error, a timeout and an empty result are three different facts (Lesson 20).</li>
+    <li><b>Build the viewer early.</b> A trace nobody can read easily is a trace nobody reads. Even a script that prints an indented list is enough.</li>
+  </ul>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: instrument the agent</h2>
+  <p><b>Time:</b> 2 hours. No new libraries: a tracer is forty lines.</p>
+<pre><code>import contextvars, json, re, time, uuid
+from contextlib import contextmanager
+
+_trace = contextvars.ContextVar("trace", default=None)
+_parent = contextvars.ContextVar("parent", default=None)
+TRACE_FILE = "traces/spans.jsonl"          # create the traces folder first
+
+REDACT = [(re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "[EMAIL]"),
+          (re.compile(r"\+?\d[\d\s-]{7,}\d"), "[PHONE]"),
+          (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"), "[KEY]")]
+
+def redact(value):
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    for pattern, label in REDACT:
+        text = pattern.sub(label, text)
+    return text[:4000]                      # bound what one attribute can hold
+
+@contextmanager
+def span(name, kind="other", **attrs):
+    trace_id = _trace.get() or uuid.uuid4().hex[:12]
+    span_id, parent = uuid.uuid4().hex[:8], _parent.get()
+    t1, t2 = _trace.set(trace_id), _parent.set(span_id)
+    record = {"trace": trace_id, "span": span_id, "parent": parent, "name": name,
+              "kind": kind, "start": time.time(), "attrs": dict(attrs)}
+    try:
+        yield record["attrs"]               # the body may add attributes, e.g. token counts
+    except Exception as e:
+        record["error"] = repr(e)
+        raise
+    finally:
+        record["end"] = time.time()
+        record["attrs"] = {k: v if isinstance(v, (int, float, bool)) else redact(v)
+                           for k, v in record["attrs"].items()}      # redact at the moment of storing
+        with open(TRACE_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        _trace.reset(t1); _parent.reset(t2)
+
+# usage
+with span("report", kind="request", word=word, prompt_version="v7", model=MODEL) as root:
+    with span("model: plan", kind="model") as a:
+        r = client.chat.completions.create(model=MODEL, messages=messages, tools=TOOLS)
+        a["input_tokens"], a["output_tokens"] = r.usage.prompt_tokens, r.usage.completion_tokens
+    with span("tool: frequency", kind="tool", args={"word": word}) as a:
+        result = frequency(word)
+        a["result"] = result</code></pre>
+  <ol>
+    <li>Wrap every model call, tool call, compaction, report write and verification in a span. Give the root span the word, the versions, and at the end the outcome and total tokens.</li>
+    <li>Write <code>show_trace(trace_id)</code>: read the file, select the trace, and print spans indented by depth with duration and key attributes. Add a text waterfall if you like.</li>
+    <li>Run twenty reports. Then answer from the trace file alone: which span kind takes the most total time? Which single span was slowest? What share of tokens went to the report-writing call?</li>
+    <li>Reproduce the fault from Try it 1: make one tool time out and return an empty result. Find it using only <code>show_trace</code>.</li>
+    <li>Paste text containing an email address into a question. Confirm it does not appear in the trace file. Then try a person's name.</li>
+    <li>Open-code the failures and oddities in your twenty traces: one line of notes each, then group and count.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l25-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l25-r1"><label for="r1"><b>Required.</b> The OpenTelemetry documentation's concept page on <a href="https://opentelemetry.io/docs/concepts/signals/traces/">traces</a>: spans, span context, attributes, events and status. Map each term to a field in your tracer.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l25-r2"><label for="r2"><b>Required.</b> Your own twenty traces, read in full, with a note on each. As before, this counts.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l25-r3"><label for="r3"><b>Optional.</b> Jurafsky &amp; Martin, <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a>, the sequence-labeling chapter: the section on named entity recognition, the task behind redacting names.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 26:</b> every individual trace from last month looks fine, and so does every trace from this month. Yet users say the answers have become worse. How could both be true, and how would you have noticed without being told?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w12-l24-agent-evals.html">← Lesson 24</a> · <a href="../index.html">Course map</a> · <a href="w13-l26-monitoring.html">Lesson 26 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson25.js"></script>
+</body>
+</html>

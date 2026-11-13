@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 27: Caching, model routing, cost control</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 6 · Week 14 · Lesson 27 · about 75 minutes</div>
+    <h1>Caching, model routing, cost control</h1>
+    <p class="lede">A prototype's bill is a curiosity. A service's bill is a design constraint. There are three honest ways to spend less: do not repeat work, do not use more model than a task needs, and do not let any request run without a limit. Each has a way of going wrong that costs you quality instead.</p>
+    <ul class="toc">
+      <li><a href="#where">1 Where it goes</a></li>
+      <li><a href="#cache">2 Caching</a></li>
+      <li><a href="#same">3 "The same question"</a></li>
+      <li><a href="#route">4 Routing</a></li>
+      <li><a href="#budget">5 Budgets</a></li>
+      <li><a href="#order">6 In what order</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Find where a system's tokens are spent, from its traces.</li>
+      <li>Choose among exact, normalised, prefix and semantic caching, and say when each returns a wrong answer.</li>
+      <li>Design a cascade that sends easy work to a cheap model without lowering quality.</li>
+      <li>Enforce budgets per request, per user and per day.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> The cheapest correct response to a question you have already answered is the stored answer: no model call at all. It becomes wrong when the question only <i>looks</i> the same, or when the right answer has changed since: the corpus was updated, the prompt was improved, the model was replaced. Caching is easy. Knowing when a cached answer is still valid is the whole difficulty.</div>
+
+  <h2 id="where">1. Know where the money goes</h2>
+  <p>Before optimising, measure. Your traces (Lesson 25) hold tokens per span, so you can total cost by span kind, by step number and by request. Three patterns show up in almost every agent:</p>
+  <ul>
+    <li><b>Input dominates.</b> Because history is re-sent at each step (Lesson 21), most tokens are input tokens, most of those are old tool results, and most of <i>those</i> are identical from one step to the next.</li>
+    <li><b>Cost is long-tailed.</b> A few runs cost ten times the typical one. Report the p95 of cost, as you do for latency (Lesson 26).</li>
+    <li><b>A few steps matter.</b> Often one call, the final report or a heavy tool result, accounts for a large share.</li>
+  </ul>
+  <p>Each pattern points to a lever. Repeated identical input calls for caching. The long tail calls for limits. The heavy step calls for a closer look at that one prompt or tool.</p>
+
+  <h2 id="cache">2. Four kinds of cache</h2>
+  <table>
+    <tr><th>Cache</th><th>Key</th><th>Saves</th><th>Risk</th></tr>
+    <tr><td><b>Tool results</b></td><td>tool name, arguments, data version</td><td>recomputation of deterministic work such as <code>frequency("run")</code></td><td>almost none, if the data version is in the key</td></tr>
+    <tr><td><b>Exact response</b></td><td>model, prompt version, parameters, full input</td><td>the whole model call for an identical request</td><td>almost none; only identical requests hit</td></tr>
+    <tr><td><b>Prompt prefix</b> (at the provider)</td><td>the unchanged beginning of the request</td><td>part of the input cost and latency for a long stable prefix</td><td>none for correctness; needs the stable-first layout of Lesson 7</td></tr>
+    <tr><td><b>Semantic</b></td><td>similarity of the new question to an earlier one</td><td>the model call for a <i>reworded</i> question</td><td>real: serving the answer to a different question</td></tr>
+  </table>
+  <p>The first three are safe and should be your defaults. You built the second in Lesson 12 for the eval harness; the same code serves production. Prefix caching suits agents especially well, because each step's request begins with everything the previous step sent.</p>
+  <p>Whatever the kind, the hard part is <b>invalidation</b>: knowing when an entry must no longer be used. Put every input that affects the answer into the key (model ID, prompt version, corpus or index version) so that changing any of them misses automatically. Add an expiry time for anything that depends on the outside world.</p>
+
+  <h2 id="same">3. When are two questions the same question?</h2>
+  <p>This is a question about meaning, and you have the tools from this course to see why it is treacherous. Lexical similarity and semantic similarity diverge (Lesson 15). Embeddings place <i>safe</i> and <i>not safe</i> side by side (Lesson 2). A semantic cache stakes correctness on a similarity score.</p>
+
+  <div class="try" id="cs">
+    <span class="label">Try it · 1</span>
+    <h3>Tune a cache</h3>
+    <p class="small">Twelve requests arrive in order. Similarity here is plain word overlap, a stand-in for embedding similarity that fails in the same ways. Each request has a true intent, so wrong hits can be counted.</p>
+    <label class="field"><span>Cache type</span>
+      <select id="cs-mode"><option value="none">None</option><option value="exact">Exact text</option><option value="norm">Normalised text (case, punctuation, spacing)</option><option value="sem" selected>Similarity above a threshold</option></select></label>
+    <div class="row" id="cs-trow"><label for="cs-t" class="small" style="min-width:150px">Threshold <b id="cs-tv">0.80</b></label><input id="cs-t" type="range" min="0.5" max="1" step="0.05" value="0.8"></div>
+    <div class="out" id="cs-out" aria-live="polite"></div>
+    <div style="overflow-x:auto"><table class="tight" id="cs-table"></table></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> Start with exact, then normalised: every hit is correct. Now similarity at 0.80: which request is answered wrongly, and what single word made the difference? Lower the threshold to 0.65 to catch the paraphrases. What else gets caught? There is no threshold that catches every rewording and no wrong answer.</p>
+  </div>
+  <p>So a semantic cache is a retrieval system with a correctness requirement, and it gets treated like one: an eval set of question pairs labelled same or different, a threshold chosen on that set, wrong-hit rate monitored in production (Lesson 26). Many teams find that normalisation plus exact matching captures most of the savings with none of the risk, and stop there.</p>
+
+  <h2 id="route">4. Use no more model than the task needs</h2>
+  <p>Model prices span a wide range, and many requests are easy. <b>Routing</b> sends each request to the cheapest model that can handle it. Three ways to decide:</p>
+  <ul>
+    <li><b>Rules.</b> By task type, language or length. Tagging English sentences goes to the small model; Arabic segmentation to the large one.</li>
+    <li><b>A classifier.</b> A small model, or a few lines of code, predicts difficulty.</li>
+    <li><b>A cascade.</b> Try the cheap model first. Accept its answer if it passes a gate; otherwise escalate to the strong model. No prediction needed: the gate decides after the fact.</li>
+  </ul>
+  <p>The cascade is the most useful, and it depends entirely on the gate. You have built gates since Lesson 8: schema checks, invariants, the citation verifier. A cascade is safe to the extent that its gate catches the cheap model's bad answers. An answer that is wrong and passes is served to the user.</p>
+
+  <div class="try" id="ca">
+    <span class="label">Try it · 2</span>
+    <h3>Price a cascade</h3>
+    <div class="row"><label for="ca-g" class="small" style="min-width:200px">Cheap model passes the gate on <b id="ca-gv">70%</b></label><input id="ca-g" type="range" min="10" max="98" step="1" value="70"></div>
+    <div class="row"><label for="ca-r" class="small" style="min-width:200px">Strong model costs <b id="ca-rv">10×</b> the cheap one</label><input id="ca-r" type="range" min="2" max="40" step="1" value="10"></div>
+    <div class="row"><label for="ca-f" class="small" style="min-width:200px">Passes that are actually wrong <b id="ca-fv">3%</b></label><input id="ca-f" type="range" min="0" max="25" step="1" value="3"></div>
+    <div class="bars" id="ca-bars"></div>
+    <div class="out" id="ca-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> At a price ratio of 2, how often must the cheap model pass before the cascade saves anything? Why? Then set wrong passes to 15%: the savings are unchanged and the product is worse. The third slider is the quality of your gate, and it is the one number here you can only learn from an eval.</p>
+  </div>
+
+  <h2 id="budget">5. Budgets are enforced, not hoped for</h2>
+  <table>
+    <tr><th>Scope</th><th>Limit</th><th>When hit</th></tr>
+    <tr><td>One model call</td><td><code>max_tokens</code></td><td>output truncated; check the finish reason (Lesson 3)</td></tr>
+    <tr><td>One request</td><td>steps, total tokens, wall-clock time (Lessons 19, 22)</td><td>stop, return partial findings, say so</td></tr>
+    <tr><td>One user</td><td>requests per minute, tokens per day</td><td>refuse politely with a time to retry</td></tr>
+    <tr><td>The whole service</td><td>spend per day</td><td>a <b>circuit breaker</b>: switch to a cheaper mode or stop accepting work, and alert a person</td></tr>
+  </table>
+  <p>The last row exists for the day something loops, or someone scripts ten thousand requests. Without it, the first you hear of the problem is the invoice. Decide in advance what the service does when money is tight: serve cached answers only, use the cheap model only, cover fewer genres. A planned, announced reduction is called <b>graceful degradation</b>, and it beats both an outage and an unlimited bill.</p>
+
+  <h2 id="order">6. The order to pull levers in</h2>
+  <ol>
+    <li><b>Stop waste.</b> Smaller tool results (Lesson 20), compaction (Lesson 21), fewer examples (Lesson 6), shorter stable prompts (Lesson 7). These lower cost and usually raise quality.</li>
+    <li><b>Add safe caches.</b> Tool results, exact responses, provider prefix caching.</li>
+    <li><b>Enforce budgets.</b> They cost nothing and cap the worst case.</li>
+    <li><b>Route.</b> A cascade behind a gate you have measured.</li>
+    <li><b>Only then</b>, consider semantic caching or dropping to a weaker model everywhere, with the eval harness open.</li>
+  </ol>
+  <p>The rule running through all five: every cost change is a system change, so it goes through the harness (Lesson 12) and is reported as cost <i>and</i> quality together (Lesson 24). For work with no person waiting, such as running an eval or annotating a corpus overnight, also check whether your provider offers discounted batch processing.</p>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: halve the bill, keep the score</h2>
+  <p><b>Time:</b> 2.5 hours.</p>
+<pre><code>import hashlib, json, time
+
+class Cache:
+    def __init__(self, path, ttl_seconds=None):
+        self.path, self.ttl = path, ttl_seconds
+        try:
+            self.data = json.load(open(path, encoding="utf-8"))
+        except FileNotFoundError:
+            self.data = {}
+        self.hits = self.misses = 0
+
+    def get_or_compute(self, key_parts, fn):
+        key = hashlib.sha256(json.dumps(key_parts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        entry = self.data.get(key)
+        if entry and (self.ttl is None or time.time() - entry["at"] &lt; self.ttl):
+            self.hits += 1
+            return entry["value"]
+        self.misses += 1
+        value = fn()
+        self.data[key] = {"value": value, "at": time.time()}
+        json.dump(self.data, open(self.path, "w", encoding="utf-8"), ensure_ascii=False)
+        return value
+
+CORPUS_VERSION = "brown-1961-v1"
+tool_cache = Cache("cache/tools.json")
+
+def cached_tool(name, args):
+    return tool_cache.get_or_compute([name, args, CORPUS_VERSION],
+                                     lambda: FUNCTIONS[name](**args))
+
+def cascade(question, cheap, strong, gate):
+    """gate(answer) returns a list of problems; empty means accept."""
+    answer = run_agent(question, model=cheap)
+    problems = gate(answer)
+    if not problems:
+        return answer, "cheap"
+    return run_agent(question, model=strong), "escalated"
+
+class DailyBudget:
+    def __init__(self, limit_usd):
+        self.limit, self.spent, self.day = limit_usd, 0.0, time.strftime("%Y-%m-%d")
+    def charge(self, usd):
+        today = time.strftime("%Y-%m-%d")
+        if today != self.day:
+            self.day, self.spent = today, 0.0
+        self.spent += usd
+    def allow(self):
+        return self.spent &lt; self.limit</code></pre>
+  <ol>
+    <li>From your traces, compute the share of tokens by span kind and the p50 and p95 cost per report. Write the baseline down, with the eval scores from Lesson 24 beside it.</li>
+    <li>Route every tool call through <code>cached_tool</code>. Rerun the Lesson 24 eval twice. What is the hit rate on the second run, and how much time is saved?</li>
+    <li>Change <code>CORPUS_VERSION</code> and confirm that every call misses. Then put it back.</li>
+    <li>Find out whether your provider and model support prompt caching and how it is switched on. If they do, enable it and read cached-token counts from the usage data on a twenty-step run.</li>
+    <li>Build the cascade with a cheap and a strong model, using the report verifier as the gate. Run the eval. Report: share escalated, cost per task, success rate, share solved every time, against the strong model alone.</li>
+    <li>Among the cheap model's answers that passed the gate, how many are wrong by the eval's checks? That is your third slider from Try it 2.</li>
+    <li>Wire in <code>DailyBudget</code> with a low limit. When it trips, serve only cached answers and say so in the response.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l27-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l27-r1"><label for="r1"><b>Required.</b> Chen, Zaharia &amp; Zou (2023), <a href="https://arxiv.org/abs/2305.05176">FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance</a>. Read the introduction and the section on the model cascade.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l27-r2"><label for="r2"><b>Required.</b> Your provider's documentation on prompt caching and on batch processing. Note what must be true of a request for the cache to apply, how long entries live, and how cached tokens are priced and reported.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l27-r3"><label for="r3"><b>Optional.</b> Go back to Lesson 15's table of lexical against semantic similarity, and write five pairs of questions your own service might receive that a similarity cache would wrongly treat as the same.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 28:</b> your agent runs from your terminal, for you. List everything that changes on the day a stranger on the internet can send it a request.</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w13-l26-monitoring.html">← Lesson 26</a> · <a href="../index.html">Course map</a> · <a href="w14-l28-deploy.html">Lesson 28 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson27.js"></script>
+</body>
+</html>
