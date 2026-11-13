@@ -136,14 +136,14 @@ window.COURSE = {
       weeks: [
         { n: 15, title: "Changing the model", ling: "What models learn about syntax and phonology",
           lessons: [
-            { id: "l29", title: "When fine-tuning beats prompting and retrieval" },
-            { id: "l30", title: "Fine-tuning a small open model" }
+            { id: "l29", title: "When fine-tuning beats prompting and retrieval", href: "lessons/w15-l29-when-to-tune.html", mins: 75 },
+            { id: "l30", title: "Fine-tuning a small open model", href: "lessons/w15-l30-finetune.html", mins: 80 }
           ],
-          reading: "SLP3, the chapters on transformers and large language models" },
+          reading: "Fadel et al. (2019) on Arabic diacritization; Hu et al. (2021), LoRA; SLP3 on fine-tuning" },
         { n: 16, title: "Capstone", ling: "Putting linguistic analysis to work",
           lessons: [
-            { id: "l31", title: "Running open models locally; quantization" },
-            { id: "l32", title: "Capstone: the linguistic analysis workbench" }
+            { id: "l31", title: "Running open models locally; quantization", href: "lessons/w16-l31-local.html", mins: 70 },
+            { id: "l32", title: "Capstone: the linguistic analysis workbench", href: "lessons/w16-l32-capstone.html", mins: 60 }
           ],
           reading: "Your own write-up: what worked, what the evals showed", milestone: "Ship the capstone" }
       ]

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 30: Fine-tuning a small open model</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 7 · Week 15 · Lesson 30 · about 80 minutes</div>
+    <h1>Fine-tuning a small open model</h1>
+    <p class="lede">Training sounds like a different discipline from everything so far. It is the same loop you met in Lesson 1, predict the next token, run on your examples with one addition: when the prediction is wrong, the model is adjusted. This lesson covers what is adjusted, how to keep the adjustment small, and how to tell when to stop.</p>
+    <ul class="toc">
+      <li><a href="#what">1 What training does</a></li>
+      <li><a href="#lora">2 LoRA</a></li>
+      <li><a href="#data">3 Data</a></li>
+      <li><a href="#stop">4 When to stop</a></li>
+      <li><a href="#eval">5 Evaluating</a></li>
+      <li><a href="#knobs">6 The settings</a></li>
+      <li><a href="#quiz">Checkpoint</a></li>
+      <li><a href="#lab">Lab</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="card">
+    <h3>By the end you can</h3>
+    <ul class="goals" style="margin:0">
+      <li>Explain a training step in terms of next-token prediction.</li>
+      <li>Explain how LoRA adapts a large model by training a small number of parameters.</li>
+      <li>Prepare a fine-tuning dataset and avoid the common ways of spoiling it.</li>
+      <li>Read training and validation loss curves, and stop at the right point.</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>Answer to last lesson's question.</b> Four thousand sentences cannot sensibly rewrite billions of numbers, and should not try: the model's general knowledge of Arabic lives in those numbers, and you want to keep it. The trick is to freeze the model entirely and train a small add-on beside it, a few million numbers that nudge its behaviour. That add-on is small enough for four thousand examples to shape and for a laptop to train.</div>
+
+  <h2 id="what">1. What a training step does</h2>
+  <p>Take one training pair: the unvowelled sentence as input, the vowelled sentence as the target. Feed the input, followed by the target, into the model. At every position of the target, the model produces its distribution over the next token (Lesson 1). You know which token <i>should</i> come next, because you have the answer.</p>
+  <ul>
+    <li>The <b>loss</b> is a number saying how surprised the model was by the correct token: low if it gave that token high probability, high if not. It is Lesson 3's surprisal, averaged over the target.</li>
+    <li><b>Backpropagation</b> works out, for every trainable parameter, which direction of change would have lowered the loss.</li>
+    <li>The <b>optimiser</b> moves each parameter a small step in that direction. The size of the step is the <b>learning rate</b>.</li>
+  </ul>
+  <p>Repeat over thousands of examples and the model becomes steadily less surprised by correct diacritisation, which is another way of saying that it gets better at producing it. One pass over the whole training set is an <b>epoch</b>.</p>
+
+  <h2 id="lora">2. Changing a little: LoRA</h2>
+  <p>Updating every parameter, <b>full fine-tuning</b>, needs a great deal of memory, produces a complete copy of the model for each task, and can damage abilities you were not training (this is called <b>catastrophic forgetting</b>). <b>Parameter-efficient</b> methods avoid all three. The most widely used is <b>LoRA</b>, low-rank adaptation.</p>
+  <p>A model's knowledge sits in large tables of numbers, weight matrices. LoRA leaves each matrix frozen and learns a small <i>correction</i> to it. The correction is not stored as a full table. It is stored as the product of two thin ones: if the original is 4,096 by 4,096, the correction is a 4,096-by-8 table times an 8-by-4,096 table. The number 8 is the <b>rank</b>, written <i>r</i>. The assumption, which holds well in practice, is that adapting to one task needs only a few directions of change, not millions of independent ones.</p>
+
+  <div class="try" id="lr">
+    <span class="label">Try it · 1</span>
+    <h3>Count the parameters</h3>
+    <div class="row"><label for="lr-d" class="small" style="min-width:170px">Matrix size <b id="lr-dv">4096</b> × <b id="lr-dv2">4096</b></label><input id="lr-d" type="range" min="9" max="13" step="1" value="12"></div>
+    <div class="row"><label for="lr-r" class="small" style="min-width:170px">Rank r <b id="lr-rv">8</b></label><input id="lr-r" type="range" min="0" max="7" step="1" value="3"></div>
+    <svg id="lr-svg" viewBox="0 0 320 130" role="img" aria-label="A large frozen matrix beside two thin trainable matrices" style="width:100%;max-width:440px;display:block;margin:6px auto"></svg>
+    <div class="out" id="lr-out" aria-live="polite"></div>
+    <p class="small" style="margin:0"><b>Experiments.</b> At rank 8, what share of the matrix's parameters is trained? Raise the rank to 64: more capacity to learn, and more to overfit with. Real models have dozens of such matrices, and LoRA is usually applied to a subset of them, so the trained share of the whole model is commonly well under one percent.</p>
+  </div>
+  <p>The result of training is an <b>adapter</b>: a file of a few megabytes holding only the thin tables. It is useless alone and specific to its base model. At run time it is loaded beside the base, or merged into it permanently. One base model can serve many tasks by swapping adapters.</p>
+
+  <h2 id="data">3. The dataset is the specification</h2>
+  <p>In prompting, your instructions define the task. In fine-tuning, your examples do, and the model will learn whatever is in them, including what you did not intend (Lesson 6's warning, at a thousand times the strength).</p>
+  <ul>
+    <li><b>Format as you will use it.</b> Train on the same instruction and layout you will send in production. A model tuned on one phrasing and queried with another gives part of the benefit back.</li>
+    <li><b>Quality over quantity.</b> A few thousand clean pairs beat a hundred thousand noisy ones. Every error in the data is taught. Read a sample before every run.</li>
+    <li><b>Cover what you will meet.</b> Lengths, genres, punctuation, numbers, names. If all training text is classical and production text is news, expect a drop (Lesson 26's drift, built in from the first day).</li>
+    <li><b>Three sets, strictly separate.</b> Training, validation (to decide when to stop) and test (touched once, at the end). No sentence in more than one, and beware near-duplicates: religious and classical texts repeat the same passages across many books.</li>
+  </ul>
+
+  <h2 id="stop">4. Knowing when to stop</h2>
+  <p>During training you watch two numbers. <b>Training loss</b> is measured on the examples being learned from, and it nearly always keeps falling. <b>Validation loss</b> is measured on held-out examples the model never trains on, and it tells the truth. At first both fall together: the model is learning the task. Then validation loss levels off and begins to rise while training loss continues down. From that point the model is memorising its training sentences instead of learning diacritisation. This is <b>overfitting</b>, and the remedy is to keep the version saved at the lowest validation loss, known as <b>early stopping</b>.</p>
+
+  <div class="try" id="lc">
+    <span class="label">Try it · 2</span>
+    <h3>Read the curves</h3>
+    <div class="row"><label for="lc-n" class="small" style="min-width:170px">Training examples <b id="lc-nv">1,778</b></label><input id="lc-n" type="range" min="2" max="4.5" step="0.25" value="3.25"></div>
+    <div class="row"><label for="lc-r" class="small" style="min-width:170px">Capacity (rank) <b id="lc-rv">8</b></label><input id="lc-r" type="range" min="1" max="6" step="1" value="3"></div>
+    <svg id="lc-svg" viewBox="0 0 320 170" role="img" aria-label="Training and validation loss by epoch" style="width:100%;max-width:460px;display:block;margin:6px auto"></svg>
+    <div class="out" id="lc-out" aria-live="polite"></div>
+    <p class="small" style="margin:0">These curves are a <b>schematic</b> of the usual pattern, drawn from a simple formula, not a real training run. <b>Experiments.</b> With 100 examples, where is the best epoch, and how far apart are the two curves at the end? Now 30,000 examples. Then hold the data at 300 and raise the rank: more capacity with little data overfits sooner. Your real curves in the lab will be noisier and should have this shape.</p>
+  </div>
+
+  <h2 id="eval">5. Evaluate like everything else</h2>
+  <p>Loss is a training signal, not a result. A tuned model is a system change, and goes through the harness (Lesson 12) like any other:</p>
+  <ul>
+    <li><b>The task metric on the test set</b>: DER and WER, with and without case endings, beside the prompted baselines from Lesson 29.</li>
+    <li><b>The gates</b>: how often does it alter letters, drop words, or fail to stop?</li>
+    <li><b>Per category</b>: did case endings improve, or only word-internal vowels? Open-code fifty errors again and compare the distribution with the baseline's.</li>
+    <li><b>Out of domain</b>: text unlike the training data. This is where a narrow model disappoints first.</li>
+    <li><b>What it lost</b>: ask the tuned model a few general questions. Heavy tuning can make a model worse at everything else, which is acceptable for a single-purpose component and should be known.</li>
+    <li><b>Cost and speed</b>: tokens per second and memory, which Lesson 31 turns into a decision.</li>
+  </ul>
+
+  <h2 id="knobs">6. The settings, and sensible starting points</h2>
+  <table>
+    <tr><th>Setting</th><th>What it does</th><th>If results are poor</th></tr>
+    <tr><td>Learning rate</td><td>size of each adjustment</td><td>loss jumps around or explodes: lower it. Loss barely moves: raise it.</td></tr>
+    <tr><td>Epochs or iterations</td><td>how long to train</td><td>decided by the validation curve, not in advance</td></tr>
+    <tr><td>Rank</td><td>capacity of the adapter</td><td>underfitting on plenty of data: raise it. Overfitting: lower it, or add data.</td></tr>
+    <tr><td>Batch size</td><td>examples per adjustment</td><td>limited by memory; smaller is slower and noisier</td></tr>
+    <tr><td>Which layers</td><td>how much of the model gets adapters</td><td>fewer layers saves memory and limits change</td></tr>
+  </table>
+  <p>Start from your tool's defaults, change one setting at a time, and log every run with its settings and scores, exactly as you logged prompt versions in Lesson 5. Fine-tuning rewards the same discipline as prompting and punishes its absence more, because each experiment takes an hour instead of a minute.</p>
+  <div class="try">
+    <span class="label">Try it · 3</span>
+    <h3>Diagnose the run</h3>
+    <div id="dg-box"></div>
+  </div>
+
+  <h2 id="quiz">Checkpoint</h2>
+  <div id="quiz-box"></div>
+
+  <h2 id="lab">Lab: train a diacritiser</h2>
+  <p><b>Time:</b> 3 hours, much of it waiting. Choose a small multilingual instruction-tuned model, in the range of half a billion to three billion parameters, that lists Arabic among its languages. Use the three files from Lesson 29. Two routes follow. Tool flags change between versions, so run each command's <code>--help</code> first.</p>
+  <p><b>Route A: Apple Silicon, with MLX.</b> <code>pip install mlx-lm</code>. It reads <code>train.jsonl</code> and <code>valid.jsonl</code> from a folder, in the chat format you already wrote.</p>
+<pre><code># train: prints training and validation loss as it goes, saves adapters/
+mlx_lm.lora --model &lt;base-model-id&gt; --train --data data --iters 1000 --batch-size 4
+
+# try it
+mlx_lm.generate --model &lt;base-model-id&gt; --adapter-path adapters \
+    --prompt "أضف التشكيل الكامل إلى النص التالي دون تغيير أي حرف:
+ذهب الولد إلى المدرسة"
+
+# merge the adapter into a standalone model for Lesson 31
+mlx_lm.fuse --model &lt;base-model-id&gt; --adapter-path adapters --save-path diacritizer</code></pre>
+  <p><b>Route B: any machine with a GPU, or a free cloud notebook, with PEFT.</b> <code>pip install transformers peft datasets accelerate</code>.</p>
+<pre><code>from datasets import load_dataset
+from peft import LoraConfig, TaskType, get_peft_model
+from transformers import (AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling,
+                          Trainer, TrainingArguments)
+
+BASE = "&lt;base-model-id&gt;"
+tok = AutoTokenizer.from_pretrained(BASE)
+tok.pad_token = tok.pad_token or tok.eos_token
+model = AutoModelForCausalLM.from_pretrained(BASE)
+model = get_peft_model(model, LoraConfig(task_type=TaskType.CAUSAL_LM, r=8,
+                                         lora_alpha=16, lora_dropout=0.05))
+model.print_trainable_parameters()          # compare with Try it 1
+
+data = load_dataset("json", data_files={"train": "data/train.jsonl", "valid": "data/valid.jsonl"})
+def encode(row):
+    text = tok.apply_chat_template(row["messages"], tokenize=False)
+    return tok(text, truncation=True, max_length=512)
+data = data.map(encode, remove_columns=["messages"])
+
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(output_dir="out", num_train_epochs=3, learning_rate=2e-4,
+                           per_device_train_batch_size=4, eval_strategy="steps", eval_steps=100,
+                           logging_steps=20, save_steps=100, load_best_model_at_end=True),
+    train_dataset=data["train"], eval_dataset=data["valid"],
+    data_collator=DataCollatorForLanguageModeling(tok, mlm=False),
+)
+trainer.train()
+model.save_pretrained("adapters")</code></pre>
+  <ol>
+    <li>Before training, run the untuned base model on twenty test sentences and score them. This is the "before".</li>
+    <li>Train. Record training and validation loss at each report and plot them. At which step is validation loss lowest? Does your tool keep that checkpoint?</li>
+    <li>Run the tuned model on all 200 test sentences at temperature 0. Report DER and WER, with and without case endings, in one table beside Lesson 29's three baselines.</li>
+    <li>Run your letter-preservation gate. How often does the tuned model alter the text, compared with the baseline?</li>
+    <li>Open-code fifty of its errors. Has the distribution shifted since the baseline? Are case endings still the largest group?</li>
+    <li>Train again with a quarter of the data. How much worse is it? Then with rank doubled. Log every run.</li>
+    <li>Ask the tuned model three general questions unrelated to diacritisation, and compare its answers with the base model's.</li>
+  </ol>
+  <label for="lab-notes"><b>Lab notes</b> <span class="small">(saved in this browser)</span></label>
+  <textarea id="lab-notes" data-save="l30-notes" dir="auto" style="min-height:140px"></textarea>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l30-r1"><label for="r1"><b>Required.</b> Hu et al. (2021), <a href="https://arxiv.org/abs/2106.09685">LoRA: Low-Rank Adaptation of Large Language Models</a>. Read the introduction and the method section. Match its notation to the thin tables of Try it 1.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l30-r2"><label for="r2"><b>Required.</b> The documentation of the tool you used: the <a href="https://huggingface.co/docs/peft/quicktour">PEFT quicktour</a>, or the LoRA guide in the MLX LM repository. Find what each default setting is.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l30-r3"><label for="r3"><b>Optional.</b> Dettmers et al. (2023), <a href="https://arxiv.org/abs/2305.14314">QLoRA: Efficient Finetuning of Quantized LLMs</a>. LoRA applied to a compressed base model, which is what makes larger models trainable on small machines, and a bridge to Lesson 31.</label></li>
+  </ul>
+  <div class="note"><b>Bring to Lesson 31:</b> your tuned model has, say, 1.5 billion parameters, each stored as a 16-bit number. How much memory is that? What could you give up to make it fit, and run faster, on an ordinary laptop?</div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w15-l29-when-to-tune.html">← Lesson 29</a> · <a href="../index.html">Course map</a> · <a href="w16-l31-local.html">Lesson 31 →</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson30.js"></script>
+</body>
+</html>

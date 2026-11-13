@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 32: Capstone, the linguistic analysis workbench</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="top"><div class="in">
+  <a href="../index.html">← Course map</a>
+  <div class="meter" aria-hidden="true"><i data-meter></i></div>
+  <span data-count class="small"></span>
+</div></div>
+
+<main class="wrap">
+  <header class="hero">
+    <div class="kicker">Phase 7 · Week 16 · Lesson 32 · the last one</div>
+    <h1>Capstone: the linguistic analysis workbench</h1>
+    <p class="lede">There is nothing new to learn in this lesson. Its job is to make you put the six projects together into one system, describe honestly how good that system is, and see the course as a whole.</p>
+    <ul class="toc">
+      <li><a href="#map">1 The whole map</a></li>
+      <li><a href="#ideas">2 Six ideas</a></li>
+      <li><a href="#recall">3 Recall</a></li>
+      <li><a href="#spec">4 The capstone</a></li>
+      <li><a href="#writeup">5 The write-up</a></li>
+      <li><a href="#next">6 Afterwards</a></li>
+      <li><a href="#quiz">Final review</a></li>
+      <li><a href="#reading">Reading</a></li>
+    </ul>
+  </header>
+
+  <div class="note"><b>Answer to last lesson's question.</b> One number per project: boundary agreement between tokens and morphemes; tag accuracy and macro-F1 against a treebank; kappa between your judge and you; recall@5 by language; the share of agent tasks solved on every run, with cost per task; p95 latency and verifier failure rate in service; DER with and without case endings. If any of those is still blank for you, the capstone is where it gets filled in.</div>
+
+  <h2 id="map">1. What you built, and how it fits together</h2>
+  <table>
+    <tr><th>Phase</th><th>You learned to</th><th>You built</th></tr>
+    <tr><td>1 Foundations</td><td>see text as tokens and vectors; call a model; get structured output</td><td>tokenizer explorer</td></tr>
+    <tr><td>2 Prompts and context</td><td>brief a model; choose examples; budget context; chain and gate</td><td>linguistic annotator</td></tr>
+    <tr><td>3 Evaluation</td><td>measure against gold; validate a judge; block regressions</td><td>eval harness</td></tr>
+    <tr><td>4 Retrieval</td><td>search by words and by meaning; rerank; answer with checkable citations, across languages</td><td>cross-lingual search</td></tr>
+    <tr><td>5 Agents</td><td>let a model choose steps, with good tools, memory and guard rails</td><td>corpus research agent</td></tr>
+    <tr><td>6 Production</td><td>trace, monitor, control cost, deploy in stages</td><td>the agent as a service</td></tr>
+    <tr><td>7 Adaptation</td><td>decide when to change the model; fine-tune; run locally</td><td>a diacritiser of your own</td></tr>
+  </table>
+  <p>Read the middle column as a single sentence and it describes the job: put the right text in front of a model, constrain what comes out, measure the result, and operate the whole thing. Everything else is detail.</p>
+
+  <h2 id="ideas">2. Six ideas that ran through all of it</h2>
+  <ol>
+    <li><b>A model sees tokens and predicts the next one.</b> Cost, context limits, sampling, the language tax, fine-tuning loss: all follow from that one fact (Lessons 1, 3, 21, 30, 31).</li>
+    <li><b>The model knows only what is in its context.</b> Prompts, examples, retrieved passages, tool results and notes are all ways of deciding what goes there (Lessons 5, 7, 13, 20, 21).</li>
+    <li><b>Form can be checked by code; truth needs evidence.</b> Schemas, invariants and citation gates catch malformed output. Whether it is right takes gold data or a validated judge (Lessons 4, 8, 11, 17, 23).</li>
+    <li><b>Nothing is known until it is measured, and one run is not a measurement.</b> Baselines, confidence intervals, per-item diffs, repeated runs (Lessons 9, 10, 12, 24).</li>
+    <li><b>Text that looks like an instruction is still only text.</b> Use and mention, speech acts, injection, tool results as data (Lessons 5, 17, 22, 28).</li>
+    <li><b>Language is structured, variable and always moving.</b> Morphology, ambiguity, register, drift. Knowing how language works told you where the systems would fail before they did (every lesson).</li>
+  </ol>
+
+  <h2 id="recall">3. Recall, before you build</h2>
+  <div class="try" id="fc">
+    <span class="label">Try it · 1</span>
+    <h3>Twenty terms</h3>
+    <p class="small">Say the definition aloud, then turn the card. Be honest in marking yourself: the "review" pile is your reading list for this week.</p>
+    <div class="card" style="min-height:150px;margin:8px 0">
+      <div class="kicker" id="fc-n"></div>
+      <h3 id="fc-term" style="font-size:1.4rem"></h3>
+      <p id="fc-def" style="margin:0" aria-live="polite"></p>
+    </div>
+    <div class="row">
+      <button class="primary" id="fc-flip" type="button">Show definition</button>
+      <button id="fc-yes" type="button">Knew it</button>
+      <button id="fc-no" type="button">Review</button>
+    </div>
+    <div class="out" id="fc-out" aria-live="polite"></div>
+  </div>
+
+  <h2 id="spec">4. The capstone</h2>
+  <p><b>Build one tool for working with Arabic and English text, in which every earlier project is a component, and which you could hand to a linguist or a language teacher.</b> Give it some text or a word, and it can:</p>
+  <table>
+    <tr><th>Capability</th><th>From</th><th>Reported with</th></tr>
+    <tr><td><b>Show</b> how a model tokenises the text, beside its morphemes</td><td>Phase 1</td><td>tokens per word; boundary agreement</td></tr>
+    <tr><td><b>Annotate</b> each syntactic word: lemma, part of speech, features</td><td>Phase 2</td><td>accuracy and macro-F1 against a treebank, by language</td></tr>
+    <tr><td><b>Vowel</b> unvowelled Arabic, on a model you tuned, running locally</td><td>Phase 7</td><td>DER and WER, with and without case endings</td></tr>
+    <tr><td><b>Explain</b> a grammatical term or tag from the guidelines, in the user's language, with citations</td><td>Phase 4</td><td>recall@5 by language; citation-gate pass rate; judged faithfulness</td></tr>
+    <tr><td><b>Research</b> how a word is used across genres, as a verified report</td><td>Phase 5</td><td>task success, solved-every-time rate, cost per report</td></tr>
+    <tr><td><b>Serve</b> all of the above through one API, traced, budgeted and monitored</td><td>Phase 6</td><td>p50 and p95 latency; cost per request; one drift signal</td></tr>
+    <tr><td><b>Prove</b> any change is safe before it ships</td><td>Phase 3</td><td>the harness and its regression gate</td></tr>
+  </table>
+  <p>Two rules. <b>Integration is the work.</b> The parts exist; what is new is one configuration, one trace across components, one eval command, one place where budgets are enforced. <b>Scope by subtraction.</b> If time is short, drop a capability entirely and say so. A workbench with four capabilities and their numbers beats one with seven and no numbers.</p>
+
+  <div class="try" id="plan">
+    <span class="label">Try it · 2</span>
+    <h3>Capstone checklist</h3>
+    <p class="small">Tick items as you finish them. Your progress is saved in this browser.</p>
+    <div id="pl-list"></div>
+    <div class="meter" style="max-width:none;height:14px;margin:12px 0 4px"><i id="pl-fill" style="width:0"></i></div>
+    <div class="out" id="pl-out" aria-live="polite"></div>
+  </div>
+
+  <h2 id="writeup">5. The write-up</h2>
+  <p>Four pages at most. A reader who has not seen the code should finish it knowing what the system does, how well, and where not to trust it.</p>
+  <ol>
+    <li><b>What it is</b>, in a paragraph, with one worked example in each language.</li>
+    <li><b>Architecture</b>: one diagram, and for each component the reason it is a single call, a workflow or an agent (Lesson 19).</li>
+    <li><b>Results</b>: one table with a row per capability and its metrics, each beside a baseline. State the size of every test set (Lesson 9).</li>
+    <li><b>The Arabic–English gap</b>: for every metric you have in both languages. What narrowed it, and what did not.</li>
+    <li><b>Cost and speed</b>: per request, p50 and p95, and the hosted-or-local decision for the diacritiser (Lesson 31).</li>
+    <li><b>Failures</b>: your taxonomy from open coding (Lesson 25), with counts, and three examples you could not fix.</li>
+    <li><b>What you would not let it do unsupervised</b>, and why.</li>
+    <li><b>What you would do with another month.</b></li>
+  </ol>
+  <p>Sections 6 and 7 are the ones that show whether you have become an engineer of these systems. Anyone can report a success. Knowing precisely where your system fails, and saying so, is the skill.</p>
+
+  <h2 id="next">6. Afterwards</h2>
+  <p>The tools in this course will be replaced. Model names, libraries and prices already differ from when these lessons were written. What should last is the method, and it is short enough to carry around:</p>
+  <ul>
+    <li>Start with the simplest thing that could work, and climb only when a measurement says to.</li>
+    <li>Build the eval before the second version.</li>
+    <li>Read your system's outputs and traces every week, yourself.</li>
+    <li>Report every result with its baseline, its test-set size and its cost.</li>
+    <li>When a new technique appears, ask which of the six ideas it is an instance of, and what it would do to your numbers.</li>
+  </ul>
+  <p>And keep the linguistics. You chose to learn this field through language, and it paid off in every phase: morphology explained tokenisation, distribution explained embeddings, annotation practice explained evaluation, pragmatics explained injection, register explained drift. The people who build these systems best tend to be the ones most curious about what the systems are modelling.</p>
+
+  <h2 id="quiz">Final review</h2>
+  <p>Twelve questions across all seven phases.</p>
+  <div id="quiz-box"></div>
+
+  <h2 id="reading">Reading duties</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="r1" data-save="l32-r1"><label for="r1"><b>Required.</b> Your own notes: reread the lab notes you saved in each of the 31 earlier lessons. Mark every question you left unanswered.</label></li>
+    <li><input type="checkbox" id="r2" data-save="l32-r2"><label for="r2"><b>Required.</b> Any chapters of Jurafsky &amp; Martin's <a href="https://web.stanford.edu/~jurafsky/slp3/">Speech and Language Processing</a> that you skimmed or skipped. The chapter on transformers is the natural next step if you want to understand what is inside the model.</label></li>
+    <li><input type="checkbox" id="r3" data-save="l32-r3"><label for="r3"><b>Optional.</b> One recent paper from the ACL Anthology on Arabic NLP, chosen by you, read with this course's questions: what was the baseline, how large was the test set, what did it cost, where does it fail?</label></li>
+  </ul>
+
+  <div class="card" style="text-align:center;margin-top:36px">
+    <h3>Send me the capstone</h3>
+    <p style="margin:0">The repository link and the write-up. I will read both, run the eval command, and reply with what I would question in a review. Then the course is done, and the work is yours.</p>
+  </div>
+
+  <div class="finish">
+    <button id="finish" type="button"></button>
+    <p class="small" style="margin-top:14px"><a href="w16-l31-local.html">← Lesson 31</a> · <a href="../index.html">Course map</a></p>
+  </div>
+</main>
+
+<script src="../assets/js/curriculum.js"></script>
+<script src="../assets/js/site.js"></script>
+<script src="../assets/js/lesson32.js"></script>
+</body>
+</html>
